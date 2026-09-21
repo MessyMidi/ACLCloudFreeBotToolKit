@@ -1,2 +1,6 @@
-
-‰ïz»S ¬{®¶¸§€ƒ…ŠW‘y§@–Prµë ŠØ žŠÞ
+node_modules/
+dist/
+.vite/
+*.log
+*.tsbuildinfo
+archive-pulse/

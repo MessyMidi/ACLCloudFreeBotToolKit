@@ -1,2 +1,6 @@
+import { defineConfig } from 'vite';
 
-‰ïz»S ¬{®¶¸§€ƒ…ŠW‘y§@–Prµë/Š×œ¢wâ‚Û
+export default defineConfig({
+  base: './',
+  build: { target: 'es2022' }
+});
