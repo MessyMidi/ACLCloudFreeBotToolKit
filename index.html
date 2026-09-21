@@ -59,13 +59,14 @@
 
       <div class="workspace">
         <form class="config-column" id="generator-form" novalidate>
-          <section class="panel section-card">
+          <section class="panel section-card module-card" id="monitor-section">
             <div class="section-heading">
               <span class="section-index">01</span>
               <div><h2>Monitor</h2><p>粘贴面板生成的完整一键安装命令</p></div>
-              <span class="optional-label">LITE / KOMARI</span>
+              <label class="module-toggle"><input id="monitor-enabled" data-module-toggle type="checkbox" checked /><i></i><span>启用</span></label>
             </div>
 
+            <fieldset class="module-body" id="monitor-fields">
             <fieldset class="choice-field">
               <legend>识别方式</legend>
               <div class="segmented" id="monitor-selection">
@@ -88,15 +89,17 @@
               <label class="switch-row readonly" id="remote-row"><span><strong id="remote-title">远程控制</strong><small id="remote-detail">严格按照粘贴命令解析</small></span><input id="remote-control" type="checkbox" disabled /><i></i></label>
               <p class="parse-warning" id="parse-warning"></p>
             </div>
+            </fieldset>
           </section>
 
-          <section class="panel section-card">
+          <section class="panel section-card module-card" id="proxy-section">
             <div class="section-heading">
               <span class="section-index">02</span>
               <div><h2>VLESS + REALITY</h2><p>Mihomo 监听端口由 ACLClouds 自动注入</p></div>
-              <span class="protocol-badge">MIHOMO</span>
+              <label class="module-toggle"><input id="proxy-enabled" data-module-toggle type="checkbox" checked /><i></i><span>启用</span></label>
             </div>
 
+            <fieldset class="module-body" id="proxy-fields">
             <div class="field-grid">
               <label><span class="field-label">节点备注</span><input id="remark" name="remark" value="ACLClouds-Free" autocomplete="off" /><small class="field-error" data-error-for="remark"></small></label>
               <label>
@@ -130,9 +133,13 @@
               <summary><span>已固定版本</span><small>重启不会追踪 latest</small><svg><use href="#i-chevron" /></svg></summary>
               <div class="version-list" id="version-list"></div>
             </details>
-
-            <button class="generate-button" type="submit"><span>生成部署配置</span><svg><use href="#i-arrow" /></svg></button>
+            </fieldset>
           </section>
+
+          <div class="generator-actions">
+            <p class="selection-error" id="selection-error" role="alert"></p>
+            <button class="generate-button" type="submit"><span>生成部署配置</span><svg><use href="#i-arrow" /></svg></button>
+          </div>
         </form>
 
         <aside class="result-column">
@@ -142,7 +149,7 @@
             <div class="empty-output" id="empty-output">
               <span><svg><use href="#i-terminal" /></svg></span>
               <strong>配置会出现在这里</strong>
-              <p>完成左侧两步后点击“生成部署配置”。</p>
+              <p>启用需要的服务并完成对应配置，然后点击“生成部署配置”。</p>
             </div>
 
             <div id="generated-output" hidden>
@@ -163,8 +170,8 @@
               <li><span>1</span><div><strong>打开 Files</strong><p>进入 ACLClouds Bot 的文件管理器。</p></div></li>
               <li><span>2</span><div><strong>创建 config.env</strong><p>Create File → 名称填 <code>config</code> → 类型选 Env (.env)，粘贴配置。</p></div></li>
               <li><span>3</span><div><strong>设置 Startup Command</strong><p>进入 Startup，粘贴上方生成的命令。</p></div></li>
-              <li><span>4</span><div><strong>Restart</strong><p>等待 Console 首次输出 VLESS 链接。</p></div></li>
-              <li><span>5</span><div><strong>随时找回链接</strong><p>在 Console 输入 <code>2</code> 即可重新显示。</p></div></li>
+              <li><span>4</span><div><strong>Restart</strong><p>等待 Console 显示已启用服务的状态；启用代理时会输出 VLESS 链接。</p></div></li>
+              <li><span>5</span><div><strong>随时找回链接</strong><p>启用代理后，在 Console 输入 <code>2</code> 即可重新显示。</p></div></li>
             </ol>
           </section>
         </aside>

@@ -40,6 +40,26 @@ describe('generateEnv', () => {
     expect(output).not.toContain(monitor.token);
     expect(output).not.toContain(monitor.endpoint);
   });
+
+  it('generates a proxy-only config without monitor credentials', () => {
+    const output = generateEnv(undefined, proxy);
+    expect(output).toContain("MONITOR_ENABLED='0'");
+    expect(output).toContain("MIHOMO_ENABLED='1'");
+    expect(output).not.toContain('MONITOR_TOKEN=');
+    expect(output).toContain("REALITY_SNI='www.cloudflare.com'");
+  });
+
+  it('generates a monitor-only config without Mihomo settings', () => {
+    const output = generateEnv(monitor, undefined);
+    expect(output).toContain("MONITOR_ENABLED='1'");
+    expect(output).toContain("MIHOMO_ENABLED='0'");
+    expect(output).toContain("MONITOR_TOKEN='abc'\\''def;$()'");
+    expect(output).not.toContain('REALITY_SNI=');
+  });
+
+  it('refuses to generate a config with every service disabled', () => {
+    expect(() => generateEnv(undefined, undefined)).toThrow('至少启用一个服务');
+  });
 });
 
 describe('validateProxy', () => {

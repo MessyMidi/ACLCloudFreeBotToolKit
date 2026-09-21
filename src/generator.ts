@@ -33,36 +33,53 @@ export function validateProxy(config: ProxyConfig): ValidationResult {
   return { errors, valid: Object.keys(errors).length === 0 };
 }
 
-export function generateEnv(monitor: MonitorConfig, proxy: ProxyConfig): string {
-  const monitorVersion = TESTED_VERSIONS[monitor.type];
+export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig): string {
+  if (!monitor && !proxy) throw new Error('至少启用一个服务');
+
   const lines = [
     '# ACLClouds Free Bot · generated locally in your browser',
     '# Do not set SERVER_IP / SERVER_PORT; ACLClouds injects them.',
     '',
     '# ---------------- Monitor ----------------',
-    `MONITOR_ENABLED=${shellQuote('1')}`,
-    `MONITOR_TYPE=${shellQuote(monitor.type)}`,
-    `MONITOR_ENDPOINT=${shellQuote(monitor.endpoint)}`,
-    `MONITOR_TOKEN=${shellQuote(monitor.token)}`,
-    `MONITOR_REMOTE_CONTROL=${shellQuote(String(monitor.remoteControl))}`,
-    `MONITOR_VERSION=${shellQuote(monitorVersion.version)}`,
-    `MONITOR_URL=${shellQuote(monitorVersion.url)}`,
-    `MONITOR_SHA256=${shellQuote(monitorVersion.sha256)}`,
+    `MONITOR_ENABLED=${shellQuote(monitor ? '1' : '0')}`
+  ];
+
+  if (monitor) {
+    const monitorVersion = TESTED_VERSIONS[monitor.type];
+    lines.push(
+      `MONITOR_TYPE=${shellQuote(monitor.type)}`,
+      `MONITOR_ENDPOINT=${shellQuote(monitor.endpoint)}`,
+      `MONITOR_TOKEN=${shellQuote(monitor.token)}`,
+      `MONITOR_REMOTE_CONTROL=${shellQuote(String(monitor.remoteControl))}`,
+      `MONITOR_VERSION=${shellQuote(monitorVersion.version)}`,
+      `MONITOR_URL=${shellQuote(monitorVersion.url)}`,
+      `MONITOR_SHA256=${shellQuote(monitorVersion.sha256)}`
+    );
+  }
+
+  lines.push(
     '',
     '# ---------------- Mihomo ----------------',
-    `MIHOMO_VERSION=${shellQuote(TESTED_VERSIONS.mihomo.version)}`,
-    `MIHOMO_URL=${shellQuote(TESTED_VERSIONS.mihomo.url)}`,
-    `MIHOMO_FALLBACK_URL=${shellQuote(TESTED_VERSIONS.mihomo.fallbackUrl)}`,
-    `MIHOMO_LOGLEVEL=${shellQuote('info')}`,
-    `MIHOMO_REMARK=${shellQuote(proxy.remark)}`,
-    '',
-    '# ---------------- VLESS + REALITY ----------------',
-    `REALITY_DEST=${shellQuote(proxy.destination)}`,
-    `REALITY_SNI=${shellQuote(proxy.sni)}`,
-    `CLIENT_FINGERPRINT=${shellQuote(proxy.fingerprint)}`,
-    `VLESS_FLOW=${shellQuote('xtls-rprx-vision')}`,
-    ''
-  ];
+    `MIHOMO_ENABLED=${shellQuote(proxy ? '1' : '0')}`
+  );
+
+  if (proxy) {
+    lines.push(
+      `MIHOMO_VERSION=${shellQuote(TESTED_VERSIONS.mihomo.version)}`,
+      `MIHOMO_URL=${shellQuote(TESTED_VERSIONS.mihomo.url)}`,
+      `MIHOMO_FALLBACK_URL=${shellQuote(TESTED_VERSIONS.mihomo.fallbackUrl)}`,
+      `MIHOMO_LOGLEVEL=${shellQuote('info')}`,
+      `MIHOMO_REMARK=${shellQuote(proxy.remark)}`,
+      '',
+      '# ---------------- VLESS + REALITY ----------------',
+      `REALITY_DEST=${shellQuote(proxy.destination)}`,
+      `REALITY_SNI=${shellQuote(proxy.sni)}`,
+      `CLIENT_FINGERPRINT=${shellQuote(proxy.fingerprint)}`,
+      `VLESS_FLOW=${shellQuote('xtls-rprx-vision')}`
+    );
+  }
+
+  lines.push('');
   return lines.join('\n');
 }
 

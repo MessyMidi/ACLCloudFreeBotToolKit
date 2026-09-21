@@ -12,6 +12,8 @@ const errorBox = byId<HTMLElement>('monitor-errors');
 const remoteControl = byId<HTMLInputElement>('remote-control');
 const remoteRow = byId<HTMLElement>('remote-row');
 const revealButton = byId<HTMLButtonElement>('reveal-token');
+const monitorEnabled = byId<HTMLInputElement>('monitor-enabled');
+const proxyEnabled = byId<HTMLInputElement>('proxy-enabled');
 let parsedMonitor: MonitorConfig | undefined;
 let tokenVisible = false;
 let toastTimer = 0;
@@ -36,6 +38,12 @@ function updateTokenPreview(): void {
 }
 
 function parseCommand(): void {
+  if (!monitorEnabled.checked) {
+    showErrors([]);
+    parsedMonitor = undefined;
+    parseResult.hidden = true;
+    return;
+  }
   const result = parseMonitorCommand(commandInput.value, selectedMonitorType());
   showErrors(result.errors);
   parsedMonitor = result.config;
@@ -77,25 +85,44 @@ function renderProxyErrors(errors: ReturnType<typeof validateProxy>['errors']): 
 }
 
 function launcherUrl(): string {
-  return new URL('launcher.sh', document.baseURI).href;
+  return 'https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/download/v0.1.0/launcher.sh';
+}
+
+function clearGeneratedOutput(status = '配置已更改，请重新生成'): void {
+  const generated = byId('generated-output');
+  if (generated.hidden) return;
+  generated.hidden = true;
+  byId('empty-output').hidden = false;
+  byId('env-output').textContent = '';
+  byId('startup-output').textContent = '';
+  byId('output-status').textContent = status;
+  byId('output-panel').classList.remove('ready');
 }
 
 function generate(): void {
   parseCommand();
-  const proxy = proxyConfig();
-  const validation = validateProxy(proxy);
+  const monitor = monitorEnabled.checked ? parsedMonitor : undefined;
+  const proxy = proxyEnabled.checked ? proxyConfig() : undefined;
+  const validation = proxy ? validateProxy(proxy) : { errors: {}, valid: true };
   renderProxyErrors(validation.errors);
-  if (!parsedMonitor || !validation.valid) {
+  const selectionError = byId('selection-error');
+  selectionError.textContent = !monitorEnabled.checked && !proxyEnabled.checked ? '请至少启用 Monitor 或代理中的一个' : '';
+  if ((!monitorEnabled.checked && !proxyEnabled.checked) || (monitorEnabled.checked && !monitor) || !validation.valid) {
+    clearGeneratedOutput('请修正标记的问题');
     byId('output-status').textContent = '请修正标记的问题';
     document.querySelector('.field-error:not(:empty)')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
-  byId('env-output').textContent = generateEnv(parsedMonitor, proxy);
+  byId('env-output').textContent = generateEnv(monitor, proxy);
   byId('startup-output').textContent = generateStartupCommand(launcherUrl());
   byId('empty-output').hidden = true;
   byId('generated-output').hidden = false;
-  byId('output-status').textContent = `${parsedMonitor.type === 'lite' ? 'Lite' : 'Komari'} · 配置已就绪`;
+  const enabledServices = [
+    monitor ? (monitor.type === 'lite' ? 'Lite' : 'Komari') : '',
+    proxy ? 'VLESS + REALITY' : ''
+  ].filter(Boolean).join(' + ');
+  byId('output-status').textContent = `${enabledServices} · 配置已就绪`;
   byId('output-panel').classList.add('ready');
   if (window.innerWidth < 920) byId('output-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -149,6 +176,19 @@ function renderVersions(): void {
   }));
 }
 
+function syncModuleState(sectionId: string, fieldsId: string, toggle: HTMLInputElement): void {
+  const section = byId(sectionId);
+  const fields = byId<HTMLFieldSetElement>(fieldsId);
+  fields.disabled = !toggle.checked;
+  section.classList.toggle('module-disabled', !toggle.checked);
+  byId('selection-error').textContent = '';
+  if (toggle === monitorEnabled) {
+    if (!toggle.checked || commandInput.value.trim()) parseCommand();
+    else showErrors([]);
+  }
+  if (toggle === proxyEnabled && !toggle.checked) clearProxyErrors();
+}
+
 function applyTheme(dark: boolean): void {
   document.body.classList.toggle('dark', dark);
   const icon = byId('theme-toggle').querySelector('use')!;
@@ -165,7 +205,10 @@ function saveTheme(dark: boolean): void {
 }
 
 commandInput.addEventListener('input', parseCommand);
+form.addEventListener('input', () => clearGeneratedOutput());
 form.querySelectorAll<HTMLInputElement>('input[name="monitorType"]').forEach((input) => input.addEventListener('change', parseCommand));
+monitorEnabled.addEventListener('change', () => syncModuleState('monitor-section', 'monitor-fields', monitorEnabled));
+proxyEnabled.addEventListener('change', () => syncModuleState('proxy-section', 'proxy-fields', proxyEnabled));
 revealButton.addEventListener('click', () => { tokenVisible = !tokenVisible; updateTokenPreview(); });
 form.addEventListener('submit', (event) => { event.preventDefault(); generate(); });
 document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => button.addEventListener('click', () => void copyText(button.dataset.copy as 'env' | 'startup', button)));
@@ -176,6 +219,8 @@ byId('theme-toggle').addEventListener('click', () => {
 });
 
 renderVersions();
+syncModuleState('monitor-section', 'monitor-fields', monitorEnabled);
+syncModuleState('proxy-section', 'proxy-fields', proxyEnabled);
 const savedTheme = readTheme();
 applyTheme(savedTheme ? savedTheme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches);
 Object.entries(DEFAULT_PROXY).forEach(([key, value]) => {

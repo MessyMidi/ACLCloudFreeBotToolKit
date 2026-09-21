@@ -38,13 +38,9 @@ set -a
 source "$ENV_FILE"
 set +a
 
-: "${SERVER_IP:?ACLClouds did not provide SERVER_IP}"
-: "${SERVER_PORT:?ACLClouds did not provide SERVER_PORT}"
-
-[[ "$SERVER_PORT" =~ ^[0-9]+$ ]] || die "SERVER_PORT is not numeric: $SERVER_PORT"
-
 # ---------------- Defaults ----------------
 
+MIHOMO_ENABLED="${MIHOMO_ENABLED:-1}"
 MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.31}"
 MIHOMO_URL="${MIHOMO_URL:-https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-v1-${MIHOMO_VERSION}.gz}"
 MIHOMO_FALLBACK_URL="${MIHOMO_FALLBACK_URL:-https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz}"
@@ -64,31 +60,40 @@ MONITOR_ENDPOINT="${MONITOR_ENDPOINT:-${KOMARI_ENDPOINT:-}}"
 MONITOR_TOKEN="${MONITOR_TOKEN:-${KOMARI_TOKEN:-}}"
 MONITOR_REMOTE_CONTROL="${MONITOR_REMOTE_CONTROL:-false}"
 
-case "$MONITOR_TYPE" in
-    lite)
-        MONITOR_VERSION="${MONITOR_VERSION:-2.3.3.5}"
-        MONITOR_URL="${MONITOR_URL:-https://github.com/nuomiiiii/Lite-agent/releases/download/${MONITOR_VERSION}/Lite-agent-linux-amd64}"
-        MONITOR_SHA256="${MONITOR_SHA256:-c39042e712bd204a5ea359b6d0f0f5b2c3e6bf6fa9bdcd8954e8fad30f32a6ed}"
-        MONITOR_BIN="$LITE_BIN"
-        ;;
-    komari)
-        MONITOR_VERSION="${MONITOR_VERSION:-${KOMARI_VERSION:-1.5.11}}"
-        MONITOR_URL="${MONITOR_URL:-${KOMARI_URL:-https://github.com/komari-monitor/komari-agent/releases/download/${MONITOR_VERSION}/komari-agent-linux-amd64}}"
-        MONITOR_SHA256="${MONITOR_SHA256:-${KOMARI_SHA256:-78c28d89e523816baea010c0ed0714f245f508ffdaca0540f5c9f230f7053c8c}}"
-        MONITOR_BIN="$KOMARI_BIN"
-        ;;
-    *)
-        die "MONITOR_TYPE must be lite or komari"
-        ;;
-esac
-
+[[ "$MIHOMO_ENABLED" == "0" || "$MIHOMO_ENABLED" == "1" ]] || die "MIHOMO_ENABLED must be 0 or 1"
 [[ "$MONITOR_ENABLED" == "0" || "$MONITOR_ENABLED" == "1" ]] || die "MONITOR_ENABLED must be 0 or 1"
-[[ "$MONITOR_REMOTE_CONTROL" == "true" || "$MONITOR_REMOTE_CONTROL" == "false" ]] || die "MONITOR_REMOTE_CONTROL must be true or false"
+[[ "$MIHOMO_ENABLED" == "1" || "$MONITOR_ENABLED" == "1" ]] || die "At least one service must be enabled"
 
-[[ "$REALITY_SNI" =~ ^[A-Za-z0-9._-]+$ ]] || die "REALITY_SNI contains unsupported characters"
-[[ "$REALITY_DEST" =~ ^[A-Za-z0-9._:-]+$ ]] || die "REALITY_DEST contains unsupported characters"
-[[ "$CLIENT_FINGERPRINT" =~ ^[A-Za-z0-9._-]+$ ]] || die "CLIENT_FINGERPRINT contains unsupported characters"
-[[ "$MIHOMO_REMARK" =~ ^[A-Za-z0-9._-]+$ ]] || die "MIHOMO_REMARK contains unsupported characters"
+if [[ "$MIHOMO_ENABLED" == "1" ]]; then
+    : "${SERVER_IP:?ACLClouds did not provide SERVER_IP}"
+    : "${SERVER_PORT:?ACLClouds did not provide SERVER_PORT}"
+    [[ "$SERVER_PORT" =~ ^[0-9]+$ ]] || die "SERVER_PORT is not numeric: $SERVER_PORT"
+    [[ "$REALITY_SNI" =~ ^[A-Za-z0-9._-]+$ ]] || die "REALITY_SNI contains unsupported characters"
+    [[ "$REALITY_DEST" =~ ^[A-Za-z0-9._:-]+$ ]] || die "REALITY_DEST contains unsupported characters"
+    [[ "$CLIENT_FINGERPRINT" =~ ^[A-Za-z0-9._-]+$ ]] || die "CLIENT_FINGERPRINT contains unsupported characters"
+    [[ "$MIHOMO_REMARK" =~ ^[A-Za-z0-9._-]+$ ]] || die "MIHOMO_REMARK contains unsupported characters"
+fi
+
+if [[ "$MONITOR_ENABLED" == "1" ]]; then
+    [[ "$MONITOR_REMOTE_CONTROL" == "true" || "$MONITOR_REMOTE_CONTROL" == "false" ]] || die "MONITOR_REMOTE_CONTROL must be true or false"
+    case "$MONITOR_TYPE" in
+        lite)
+            MONITOR_VERSION="${MONITOR_VERSION:-2.3.3.5}"
+            MONITOR_URL="${MONITOR_URL:-https://github.com/nuomiiiii/Lite-agent/releases/download/${MONITOR_VERSION}/Lite-agent-linux-amd64}"
+            MONITOR_SHA256="${MONITOR_SHA256:-c39042e712bd204a5ea359b6d0f0f5b2c3e6bf6fa9bdcd8954e8fad30f32a6ed}"
+            MONITOR_BIN="$LITE_BIN"
+            ;;
+        komari)
+            MONITOR_VERSION="${MONITOR_VERSION:-${KOMARI_VERSION:-1.5.11}}"
+            MONITOR_URL="${MONITOR_URL:-${KOMARI_URL:-https://github.com/komari-monitor/komari-agent/releases/download/${MONITOR_VERSION}/komari-agent-linux-amd64}}"
+            MONITOR_SHA256="${MONITOR_SHA256:-${KOMARI_SHA256:-78c28d89e523816baea010c0ed0714f245f508ffdaca0540f5c9f230f7053c8c}}"
+            MONITOR_BIN="$KOMARI_BIN"
+            ;;
+        *)
+            die "MONITOR_TYPE must be lite or komari"
+            ;;
+    esac
+fi
 
 # ---------------- Helpers ----------------
 
@@ -196,7 +201,9 @@ install_monitor() {
     log "Monitor Agent installed ($MONITOR_TYPE $MONITOR_VERSION)"
 }
 
-install_mihomo
+if [[ "$MIHOMO_ENABLED" == "1" ]]; then
+    install_mihomo
+fi
 
 if [[ "$MONITOR_ENABLED" == "1" ]]; then
     : "${MONITOR_ENDPOINT:?Set MONITOR_ENDPOINT in config.env}"
@@ -248,9 +255,11 @@ EOF
     chmod 600 "$SECRETS_FILE"
 }
 
-generate_secrets
-# shellcheck disable=SC1090
-source "$SECRETS_FILE"
+if [[ "$MIHOMO_ENABLED" == "1" ]]; then
+    generate_secrets
+    # shellcheck disable=SC1090
+    source "$SECRETS_FILE"
+fi
 
 # ---------------- Generate Mihomo config ----------------
 
@@ -288,7 +297,9 @@ EOF
     fi
 }
 
-generate_mihomo_config
+if [[ "$MIHOMO_ENABLED" == "1" ]]; then
+    generate_mihomo_config
+fi
 
 # ---------------- Service management ----------------
 
@@ -296,6 +307,8 @@ MIHOMO_PID=""
 MONITOR_PID=""
 
 start_mihomo() {
+    [[ "$MIHOMO_ENABLED" == "1" ]] || return 0
+
     printf '\n===== Mihomo start =====\n' >> "$MIHOMO_LOG"
 
     "$MIHOMO_BIN" -d "$MIHOMO_HOME" -f "$MIHOMO_CONFIG" >>"$MIHOMO_LOG" 2>&1 &
@@ -312,6 +325,11 @@ start_mihomo() {
 }
 
 restart_mihomo() {
+    if [[ "$MIHOMO_ENABLED" != "1" ]]; then
+        printf 'Mihomo is disabled in config.env\n'
+        return
+    fi
+
     log "Restarting Mihomo..."
     stop_pid "$MIHOMO_PID"
     MIHOMO_PID=""
@@ -388,6 +406,11 @@ vless_link() {
 }
 
 show_link() {
+    if [[ "$MIHOMO_ENABLED" != "1" ]]; then
+        printf '\nMihomo is disabled in config.env; no proxy link is available.\n\n'
+        return
+    fi
+
     printf '\n'
     printf '%s\n' '================ VLESS + REALITY ================'
     vless_link
@@ -408,7 +431,9 @@ show_link() {
 show_status() {
     printf '\n'
 
-    if is_alive "$MIHOMO_PID"; then
+    if [[ "$MIHOMO_ENABLED" != "1" ]]; then
+        printf 'Mihomo : DISABLED\n'
+    elif is_alive "$MIHOMO_PID"; then
         printf 'Mihomo : RUNNING (PID %s, %s)\n' "$MIHOMO_PID" "$(pid_rss "$MIHOMO_PID")"
     else
         printf 'Mihomo : STOPPED\n'
@@ -422,7 +447,9 @@ show_status() {
         printf 'Monitor : STOPPED (%s)\n' "$MONITOR_TYPE"
     fi
 
-    printf 'Server : %s:%s\n' "$SERVER_IP" "$SERVER_PORT"
+    if [[ "$MIHOMO_ENABLED" == "1" ]]; then
+        printf 'Server : %s:%s\n' "$SERVER_IP" "$SERVER_PORT"
+    fi
 
     if [[ -r /sys/fs/cgroup/memory.current && -r /sys/fs/cgroup/memory.max ]]; then
         printf 'cgroup : %s / %s bytes\n' \
@@ -456,7 +483,9 @@ start_monitor || true
 
 log "Startup completed"
 show_status
-show_link
+if [[ "$MIHOMO_ENABLED" == "1" ]]; then
+    show_link
+fi
 show_menu
 
 while true; do
