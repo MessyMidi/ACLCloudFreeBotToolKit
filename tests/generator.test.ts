@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CLIENT_FINGERPRINTS } from '../src/constants';
 import { generateEnv, generateStartupCommand, shellQuote, validateProxy } from '../src/generator';
 
 const monitor = {
@@ -44,6 +45,15 @@ describe('generateEnv', () => {
 describe('validateProxy', () => {
   it('accepts the launcher defaults', () => {
     expect(validateProxy(proxy).valid).toBe(true);
+  });
+
+  it.each(CLIENT_FINGERPRINTS)('accepts the supported %s fingerprint', (fingerprint) => {
+    expect(validateProxy({ ...proxy, fingerprint }).valid).toBe(true);
+  });
+
+  it('rejects fingerprints outside the Mihomo and VLESS common set', () => {
+    const result = validateProxy({ ...proxy, fingerprint: 'randomized' });
+    expect(result.errors.fingerprint).toBeTruthy();
   });
 
   it('rejects missing ports and unsafe remarks', () => {

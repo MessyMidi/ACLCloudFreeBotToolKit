@@ -16,6 +16,22 @@ export const TESTED_VERSIONS = {
   }
 } as const;
 
+/**
+ * Conservative common set supported by Mihomo and VLESS/Xray clients. The
+ * selected value is written to the generated `fp=` share-link parameter.
+ */
+export const CLIENT_FINGERPRINTS = [
+  'chrome',
+  'firefox',
+  'safari',
+  'ios',
+  'android',
+  'edge',
+  '360',
+  'qq',
+  'random'
+] as const;
+
 export const DEFAULT_PROXY = {
   sni: 'www.cloudflare.com',
   destination: 'www.cloudflare.com:443',

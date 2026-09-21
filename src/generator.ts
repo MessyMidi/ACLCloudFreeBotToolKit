@@ -1,4 +1,4 @@
-import { TESTED_VERSIONS } from './constants';
+import { CLIENT_FINGERPRINTS, TESTED_VERSIONS } from './constants';
 import type { MonitorConfig, ProxyConfig, ValidationResult } from './types';
 
 function hasControlCharacters(value: string): boolean {
@@ -25,7 +25,9 @@ export function validateProxy(config: ProxyConfig): ValidationResult {
     if (!match || port < 1 || port > 65535) errors.destination = '请使用 host:port 格式，并填写有效端口';
   }
 
-  if (!/^[A-Za-z0-9._-]+$/.test(config.fingerprint)) errors.fingerprint = 'Fingerprint 包含不支持的字符';
+  if (!CLIENT_FINGERPRINTS.some((fingerprint) => fingerprint === config.fingerprint)) {
+    errors.fingerprint = '请选择 Mihomo 与 VLESS 共同支持的 Fingerprint';
+  }
   if (!config.remark.trim()) errors.remark = '请填写节点备注';
   else if (!/^[A-Za-z0-9._-]+$/.test(config.remark)) errors.remark = '备注只支持字母、数字、点、下划线和连字符';
   return { errors, valid: Object.keys(errors).length === 0 };

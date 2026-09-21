@@ -99,7 +99,22 @@
 
             <div class="field-grid">
               <label><span class="field-label">节点备注</span><input id="remark" name="remark" value="ACLClouds-Free" autocomplete="off" /><small class="field-error" data-error-for="remark"></small></label>
-              <label><span class="field-label">Client Fingerprint</span><select id="fingerprint" name="fingerprint"><option value="chrome">Chrome</option><option value="firefox">Firefox</option><option value="safari">Safari</option><option value="edge">Edge</option></select><small class="field-error" data-error-for="fingerprint"></small></label>
+              <label>
+                <span class="field-label">Client Fingerprint</span>
+                <select id="fingerprint" name="fingerprint" aria-describedby="fingerprint-hint">
+                  <option value="chrome">Chrome · 默认</option>
+                  <option value="firefox">Firefox</option>
+                  <option value="safari">Safari</option>
+                  <option value="ios">iOS</option>
+                  <option value="android">Android</option>
+                  <option value="edge">Edge</option>
+                  <option value="360">360 Browser</option>
+                  <option value="qq">QQ Browser</option>
+                  <option value="random">Random · 随机现代浏览器</option>
+                </select>
+                <small class="field-hint" id="fingerprint-hint">使用 Mihomo 与常见 VLESS 客户端均支持的 uTLS 指纹；不确定时保持 Chrome。</small>
+                <small class="field-error" data-error-for="fingerprint"></small>
+              </label>
             </div>
 
             <details class="advanced" open>
