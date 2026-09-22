@@ -85,7 +85,7 @@ function renderProxyErrors(errors: ReturnType<typeof validateProxy>['errors']): 
 }
 
 function launcherUrl(): string {
-  return 'https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/download/v0.1.0/launcher.sh';
+  return 'https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/download/v0.3.0/launcher.sh';
 }
 
 function clearGeneratedOutput(status = '配置已更改，请重新生成'): void {

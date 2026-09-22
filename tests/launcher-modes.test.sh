@@ -36,7 +36,7 @@ run_for_startup() {
     shift
     (
         cd "$dir"
-        "$@" bash launcher.sh </dev/null >output.log 2>&1
+        exec "$@" bash launcher.sh </dev/null >output.log 2>&1
     ) &
     local pid=$!
     # Both-services mode performs two one-second health checks in sequence.
@@ -56,6 +56,21 @@ assert_contains() {
     fi
 }
 
+assert_after() {
+    local before="$1"
+    local after="$2"
+    local file="$3"
+    local before_line after_line
+
+    before_line="$(grep -n -m1 "$before" "$file" | cut -d: -f1)"
+    after_line="$(grep -n -m1 "$after" "$file" | cut -d: -f1)"
+    if [[ -z "$before_line" || -z "$after_line" || "$after_line" -le "$before_line" ]]; then
+        printf 'expected "%s" after "%s"\n' "$after" "$before" >&2
+        cat "$file" >&2
+        exit 1
+    fi
+}
+
 monitor_dir="$(make_fixture monitor-only)"
 cat > "$monitor_dir/config.env" <<'EOF'
 MIHOMO_ENABLED='0'
@@ -69,6 +84,12 @@ make_long_running_agent "$monitor_dir/bin/lite-agent"
 run_for_startup "$monitor_dir" env
 assert_contains 'Monitor started (lite' "$monitor_dir/output.log"
 assert_contains 'Mihomo : DISABLED' "$monitor_dir/output.log"
+assert_contains '^change this part$' "$monitor_dir/output.log"
+assert_after 'Startup completed' '^change this part$' "$monitor_dir/output.log"
+if grep -q 'startup-probe candidate' "$monitor_dir/output.log"; then
+    printf 'diagnostic startup probe unexpectedly remained enabled\n' >&2
+    exit 1
+fi
 if grep -q 'VLESS + REALITY' "$monitor_dir/output.log"; then
     printf 'monitor-only mode unexpectedly printed a VLESS link\n' >&2
     exit 1
@@ -100,6 +121,7 @@ run_for_startup "$proxy_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
 assert_contains 'Mihomo started' "$proxy_dir/output.log"
 assert_contains 'Monitor : DISABLED' "$proxy_dir/output.log"
 assert_contains 'vless://' "$proxy_dir/output.log"
+assert_contains '^change this part$' "$proxy_dir/output.log"
 
 both_dir="$(make_fixture both-services)"
 cat > "$both_dir/config.env" <<'EOF'
@@ -116,6 +138,7 @@ run_for_startup "$both_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
 assert_contains 'Mihomo started' "$both_dir/output.log"
 assert_contains 'Monitor started (lite' "$both_dir/output.log"
 assert_contains 'vless://' "$both_dir/output.log"
+assert_contains '^change this part$' "$both_dir/output.log"
 
 disabled_dir="$(make_fixture all-disabled)"
 cat > "$disabled_dir/config.env" <<'EOF'

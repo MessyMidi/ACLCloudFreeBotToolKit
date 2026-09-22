@@ -306,6 +306,13 @@ fi
 MIHOMO_PID=""
 MONITOR_PID=""
 
+signal_pterodactyl_ready() {
+    # ACLClouds uses the Parkervcp/Pelican "golang generic" Egg. Its
+    # startup.done value is the exact text below; Wings remains in STARTING
+    # until this line appears in Console output.
+    printf '%s\n' 'change this part'
+}
+
 start_mihomo() {
     [[ "$MIHOMO_ENABLED" == "1" ]] || return 0
 
@@ -384,11 +391,19 @@ restart_monitor() {
 }
 
 cleanup() {
-    trap - EXIT TERM INT
+    trap - EXIT
     stop_pid "$MIHOMO_PID"
     stop_pid "$MONITOR_PID"
 }
-trap cleanup EXIT TERM INT
+
+shutdown() {
+    trap - TERM INT
+    cleanup
+    exit 0
+}
+
+trap cleanup EXIT
+trap shutdown TERM INT
 
 # ---------------- Display ----------------
 
@@ -482,6 +497,7 @@ start_mihomo
 start_monitor || true
 
 log "Startup completed"
+signal_pterodactyl_ready
 show_status
 if [[ "$MIHOMO_ENABLED" == "1" ]]; then
     show_link
