@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
+
+# ACLCloudFreeBotToolKit
+# Copyright (C) 2026 MessyMidi
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms under AGPLv3 Section 7:
+# see /ADDITIONAL_TERMS.md
+
 set -Eeuo pipefail
 umask 077
+
+LAUNCHER_VERSION='0.4.0'
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$BASE_DIR/bin"
@@ -313,6 +323,18 @@ signal_pterodactyl_ready() {
     printf '%s\n' 'change this part'
 }
 
+signal_bootstrap_ready() {
+    local ready_file="${LAUNCHER_READY_FILE:-}"
+    local generation="${LAUNCHER_GENERATION:-}"
+    local temporary
+
+    [[ -n "$ready_file" && -n "$generation" ]] || return 0
+    temporary="${ready_file}.tmp.$$"
+    printf '%s\n' "$generation" > "$temporary"
+    chmod 600 "$temporary"
+    mv -f "$temporary" "$ready_file"
+}
+
 start_mihomo() {
     [[ "$MIHOMO_ENABLED" == "1" ]] || return 0
 
@@ -498,6 +520,7 @@ start_monitor || true
 
 log "Startup completed"
 signal_pterodactyl_ready
+signal_bootstrap_ready
 show_status
 if [[ "$MIHOMO_ENABLED" == "1" ]]; then
     show_link

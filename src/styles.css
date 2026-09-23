@@ -1,3 +1,12 @@
+/*
+ * ACLCloudFreeBotToolKit
+ * Copyright (C) 2026 MessyMidi
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Additional terms under AGPLv3 Section 7:
+ * see /ADDITIONAL_TERMS.md
+ */
+
 :root {
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
   color: #24352f;
@@ -56,7 +65,12 @@ main { width: min(1320px, calc(100% - 56px)); margin: 0 auto; padding: 51px 0 24
 .privacy-icon { width: 36px; height: 36px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; color: var(--green); background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .privacy-strip strong { display: block; color: #4c725f; font-size: 11px; font-weight: 600; }
 .privacy-strip p { margin: 5px 0 0; color: #779284; font-size: 10px; line-height: 1.6; }
+.privacy-strip small { display: block; margin-top: 5px; color: #789486; font-size: 8px; }
+.privacy-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; margin-left: auto; }
 .local-badge { display: flex; align-items: center; gap: 7px; margin-left: auto; padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--green) 14%, transparent); border-radius: 5px; color: #719181; font-size: 7px; font-weight: 650; letter-spacing: 1px; white-space: nowrap; }
+.clear-storage { border: 0; padding: 2px 0; color: #769184; background: transparent; font: inherit; font-size: 8px; cursor: pointer; transition: color .18s; }
+.clear-storage:hover { color: var(--green); }
+.clear-storage:focus-visible { outline: 2px solid #73c7aa; outline-offset: 3px; border-radius: 2px; }
 .status-dot { width: 6px; height: 6px; display: inline-block; flex: 0 0 auto; border-radius: 50%; background: #2ca37c; }
 
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(430px, .9fr); gap: 22px; align-items: start; }
@@ -127,6 +141,10 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .switch-row input:focus-visible + i { outline: 3px solid #73c7aa; outline-offset: 2px; }
 .switch-row.readonly { cursor: default; }
 .switch-row.readonly i { opacity: .85; }
+.update-card .section-heading { margin-bottom: 16px; }
+.update-switch { padding: 13px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+.update-hint { margin: 10px 1px 0; }
+.update-hint code { font-size: 8px; }
 .parse-warning { margin: 0; padding: 0 14px 12px; color: var(--warning); font-size: 8px; }
 .parse-warning:empty { display: none; }
 
@@ -201,7 +219,7 @@ footer .status-dot { width: 4px; height: 4px; background: #8eae9d; }
 body.dark { --bg: #15221c; --surface: #1b2c23; --text: #d9e6dd; --muted: #8aa393; --line: #2b3e31; --green: #79c6a0; --green-hover: #8bd5af; --mint: #254332; --soft: #203329; --danger: #dc8c7c; --warning: #d0ae70; --shadow: 0 3px 14px rgb(0 0 0 / 5%); color-scheme: dark; }
 .dark .privacy-strip { border-color: #31513d; }
 .dark .privacy-strip strong { color: #a7cfb5; }
-.dark .privacy-strip p, .dark .local-badge { color: #91af9d; }
+.dark .privacy-strip p, .dark .privacy-strip small, .dark .local-badge, .dark .clear-storage { color: #91af9d; }
 .dark .protocol-badge { border-color: #31513d; }
 .dark input, .dark textarea, .dark select { color: #c5d6cc; }
 .dark .parse-result { border-color: #31513d; }
@@ -236,6 +254,7 @@ body.dark { --bg: #15221c; --surface: #1b2c23; --text: #d9e6dd; --muted: #8aa393
   .runtime-note { width: 100%; justify-content: space-between; gap: 6px; font-size: 7px; }
   .privacy-strip { align-items: flex-start; padding: 14px; }
   .privacy-strip p { font-size: 9px; }
+  .privacy-actions { align-items: flex-end; }
   .local-badge { display: none; }
   .section-card { padding: 17px; }
   .section-heading { align-items: flex-start; }

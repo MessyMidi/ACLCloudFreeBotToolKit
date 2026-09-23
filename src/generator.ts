@@ -1,3 +1,12 @@
+/*
+ * ACLCloudFreeBotToolKit
+ * Copyright (C) 2026 MessyMidi
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Additional terms under AGPLv3 Section 7:
+ * see /ADDITIONAL_TERMS.md
+ */
+
 import { CLIENT_FINGERPRINTS, TESTED_VERSIONS } from './constants';
 import type { MonitorConfig, ProxyConfig, ValidationResult } from './types';
 
@@ -39,6 +48,8 @@ export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig): strin
   const lines = [
     '# ACLClouds Free Bot · generated locally in your browser',
     '# Do not set SERVER_IP / SERVER_PORT; ACLClouds injects them.',
+    '',
+    `CONFIG_SCHEMA_VERSION=${shellQuote('1')}`,
     '',
     '# ---------------- Monitor ----------------',
     `MONITOR_ENABLED=${shellQuote(monitor ? '1' : '0')}`
@@ -83,7 +94,8 @@ export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig): strin
   return lines.join('\n');
 }
 
-export function generateStartupCommand(launcherUrl: string): string {
-  const quotedUrl = shellQuote(launcherUrl);
-  return `LAUNCHER_URL=${quotedUrl}; if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 -o launcher.sh "$LAUNCHER_URL"; else wget -O launcher.sh "$LAUNCHER_URL"; fi && chmod +x launcher.sh && exec bash launcher.sh`;
+export function generateStartupCommand(bootstrapUrl: string, autoUpdate: boolean): string {
+  const quotedUrl = shellQuote(bootstrapUrl);
+  const mode = autoUpdate ? 'enable' : 'disable';
+  return `BOOTSTRAP_URL=${quotedUrl}; if [ ! -s bootstrap.sh ] || ! bash -n bootstrap.sh >/dev/null 2>&1; then if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 --connect-timeout 10 -o bootstrap.sh.tmp "$BOOTSTRAP_URL"; else wget -O bootstrap.sh.tmp "$BOOTSTRAP_URL"; fi || exit 1; bash -n bootstrap.sh.tmp || exit 1; mv -f bootstrap.sh.tmp bootstrap.sh; fi; chmod +x bootstrap.sh && exec bash bootstrap.sh --AUTO_UPDATE=${mode}`;
 }
