@@ -1,3 +1,18 @@
+import type { MonitorType } from './types';
+
+/**
+ * Install source for CF Server Monitor. Unlike Lite/Komari it is not a pinned
+ * binary run by launcher.sh; it is installed by this one-click script from the
+ * generated Startup Command, so no version/sha256 is tracked here.
+ */
+export const CFSM_INSTALL_SCRIPT = 'https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh';
+
+export const MONITOR_LABELS: Record<MonitorType, string> = {
+  lite: 'Lite',
+  komari: 'Komari',
+  cfsm: 'CF Server Monitor'
+};
+
 export const TESTED_VERSIONS = {
   mihomo: {
     version: 'v1.19.31',

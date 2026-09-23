@@ -1,3 +1,4 @@
+import { MONITOR_LABELS } from './constants';
 import type { MonitorConfig, MonitorSelection, MonitorType, ParseResult } from './types';
 
 interface TokenizeResult {
@@ -65,6 +66,7 @@ function optionValues(tokens: string[], shortName: string, longName: string): st
 }
 
 function detectType(command: string): MonitorType | undefined {
+  if (/(?:githubusercontent\.com|github\.com)\/huilang-me\/cfsm-agent/i.test(command)) return 'cfsm';
   const lite = /(?:githubusercontent\.com|github\.com)\/nuomiiiii\/lite-agent/i.test(command);
   const komari = /(?:githubusercontent\.com|github\.com)\/komari-monitor\/komari-agent/i.test(command);
   if (lite === komari) return undefined;
@@ -116,6 +118,40 @@ function hasControlCharacters(value: string): boolean {
   });
 }
 
+// CF Server Monitor uses Go's flag syntax: single-dash, long names joined with
+// `=` (for example `-id=abc -secret='s' -url=https://host/update`). optionValues
+// already understands both `-name=value` and `-name value`, so reuse it directly.
+function requiredValue(
+  tokens: string[],
+  name: string,
+  label: string,
+  errors: string[]
+): string {
+  const values = optionValues(tokens, name, name);
+  if (values.length === 0) errors.push(`命令中缺少 ${name}（${label}）`);
+  if (values.length > 1) errors.push(`命令中出现了多个 ${name}，请只保留一个`);
+  const value = values[0] ?? '';
+  if (value && hasControlCharacters(value)) errors.push(`${label}不能包含换行或控制字符`);
+  return value;
+}
+
+function parseCfsm(tokens: string[], errors: string[], warnings: string[]): ParseResult {
+  const id = requiredValue(tokens, '-id', 'Server ID', errors);
+  const secret = requiredValue(tokens, '-secret', 'Secret', errors);
+  const url = requiredValue(tokens, '-url', 'URL', errors);
+  if (url && !validEndpoint(url)) errors.push('URL 必须是有效的 http:// 或 https:// 地址');
+  if (errors.length > 0) return { errors: [...new Set(errors)], warnings };
+
+  const config: MonitorConfig = {
+    type: 'cfsm',
+    endpoint: url,
+    token: secret,
+    remoteControl: false,
+    agentId: id
+  };
+  return { config, errors, warnings };
+}
+
 export function parseMonitorCommand(command: string, selection: MonitorSelection = 'auto'): ParseResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -127,10 +163,12 @@ export function parseMonitorCommand(command: string, selection: MonitorSelection
 
   const detected = detectType(trimmed);
   const type: MonitorType | undefined = selection === 'auto' ? detected : selection;
-  if (selection === 'auto' && !detected) errors.push('无法从安装脚本地址识别 Lite 或 Komari');
+  if (selection === 'auto' && !detected) errors.push('无法从安装脚本地址识别 Lite / Komari / CF Server Monitor');
   if (selection !== 'auto' && detected && detected !== selection) {
-    warnings.push(`脚本看起来属于 ${detected === 'lite' ? 'Lite' : 'Komari'}，已按手动选择处理`);
+    warnings.push(`脚本看起来属于 ${MONITOR_LABELS[detected]}，已按手动选择处理`);
   }
+
+  if (type === 'cfsm') return parseCfsm(tokenized.tokens, errors, warnings);
 
   const endpoints = optionValues(tokenized.tokens, '-e', '--endpoint');
   const tokens = optionValues(tokenized.tokens, '-t', '--token');

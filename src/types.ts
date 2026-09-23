@@ -1,11 +1,17 @@
-export type MonitorType = 'lite' | 'komari';
+export type MonitorType = 'lite' | 'komari' | 'cfsm';
 export type MonitorSelection = 'auto' | MonitorType;
 
 export interface MonitorConfig {
   type: MonitorType;
+  // For Lite/Komari this is the panel endpoint; for CF Server Monitor it holds
+  // the `-url` update server used by the startup install command.
   endpoint: string;
+  // For Lite/Komari this is the agent token; for CF Server Monitor it holds the
+  // `-secret` value.
   token: string;
   remoteControl: boolean;
+  // CF Server Monitor only: the `-id` server/agent identifier.
+  agentId?: string;
 }
 
 export interface ProxyConfig {

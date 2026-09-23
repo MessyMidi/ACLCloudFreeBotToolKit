@@ -60,6 +60,34 @@ describe('generateEnv', () => {
   it('refuses to generate a config with every service disabled', () => {
     expect(() => generateEnv(undefined, undefined)).toThrow('至少启用一个服务');
   });
+
+  it('emits CF Server Monitor variables while keeping launcher monitor disabled', () => {
+    const output = generateEnv(
+      { type: 'cfsm', endpoint: 'https://example.com/update', token: 'sekret', remoteControl: false, agentId: 'srv-1' },
+      proxy
+    );
+    expect(output).toContain("MONITOR_ENABLED='0'");
+    expect(output).toContain("CFSM_ID='srv-1'");
+    expect(output).toContain("CFSM_SECRET='sekret'");
+    expect(output).toContain("CFSM_URL='https://example.com/update'");
+    expect(output).not.toContain('MONITOR_TYPE=');
+    expect(output).not.toContain('MONITOR_SHA256=');
+  });
+
+  it('prepends the CF install script to the startup command referencing config.env vars', () => {
+    const output = generateStartupCommand('https://tool.example/launcher.sh', {
+      type: 'cfsm',
+      endpoint: 'https://example.com/update',
+      token: 'sekret',
+      remoteControl: false,
+      agentId: 'srv-1'
+    });
+    expect(output).toContain("curl -fsSL 'https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh' | sh -s -- install -id=\"$CFSM_ID\" -secret=\"$CFSM_SECRET\" -url=\"$CFSM_URL\"");
+    expect(output).toContain('exec bash launcher.sh');
+    // Real credentials never leak into the startup command; only config.env holds them.
+    expect(output).not.toContain('sekret');
+    expect(output).not.toContain('srv-1');
+  });
 });
 
 describe('validateProxy', () => {

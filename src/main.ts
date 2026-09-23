@@ -1,5 +1,5 @@
 import './styles.css';
-import { DEFAULT_PROXY, TESTED_VERSIONS } from './constants';
+import { DEFAULT_PROXY, MONITOR_LABELS, TESTED_VERSIONS } from './constants';
 import { generateEnv, generateStartupCommand, validateProxy } from './generator';
 import { maskToken, parseMonitorCommand } from './monitor-parser';
 import type { MonitorConfig, MonitorSelection, ProxyConfig } from './types';
@@ -51,15 +51,23 @@ function parseCommand(): void {
   if (!parsedMonitor) return;
 
   tokenVisible = false;
-  byId('detected-type').textContent = `已识别 ${parsedMonitor.type === 'lite' ? 'Lite' : 'Komari'}`;
+  const isCfsm = parsedMonitor.type === 'cfsm';
+  byId('detected-type').textContent = `已识别 ${MONITOR_LABELS[parsedMonitor.type]}`;
+  byId('label-endpoint').textContent = isCfsm ? 'URL' : 'Endpoint';
+  byId('label-token').textContent = isCfsm ? 'Secret' : 'Token';
+  const idRow = byId<HTMLElement>('row-agent-id');
+  idRow.hidden = !isCfsm;
+  if (isCfsm) byId('detected-agent-id').textContent = parsedMonitor.agentId ?? '';
   byId('detected-endpoint').textContent = parsedMonitor.endpoint;
   byId('parse-warning').textContent = result.warnings.join('；');
   remoteControl.checked = parsedMonitor.remoteControl;
-  remoteRow.hidden = false;
-  byId('remote-title').textContent = `远程控制：${parsedMonitor.remoteControl ? '开启' : '关闭'}`;
-  byId('remote-detail').textContent = parsedMonitor.type === 'lite'
-    ? (parsedMonitor.remoteControl ? '命令包含 --enable-remote-control' : '命令未开启，或显式设置为 false')
-    : (parsedMonitor.remoteControl ? '命令未包含 --disable-web-ssh' : '命令包含 --disable-web-ssh');
+  remoteRow.hidden = isCfsm;
+  if (!isCfsm) {
+    byId('remote-title').textContent = `远程控制：${parsedMonitor.remoteControl ? '开启' : '关闭'}`;
+    byId('remote-detail').textContent = parsedMonitor.type === 'lite'
+      ? (parsedMonitor.remoteControl ? '命令包含 --enable-remote-control' : '命令未开启，或显式设置为 false')
+      : (parsedMonitor.remoteControl ? '命令未包含 --disable-web-ssh' : '命令包含 --disable-web-ssh');
+  }
   updateTokenPreview();
 }
 
@@ -115,11 +123,11 @@ function generate(): void {
   }
 
   byId('env-output').textContent = generateEnv(monitor, proxy);
-  byId('startup-output').textContent = generateStartupCommand(launcherUrl());
+  byId('startup-output').textContent = generateStartupCommand(launcherUrl(), monitor);
   byId('empty-output').hidden = true;
   byId('generated-output').hidden = false;
   const enabledServices = [
-    monitor ? (monitor.type === 'lite' ? 'Lite' : 'Komari') : '',
+    monitor ? MONITOR_LABELS[monitor.type] : '',
     proxy ? 'VLESS + REALITY' : ''
   ].filter(Boolean).join(' + ');
   byId('output-status').textContent = `${enabledServices} · 配置已就绪`;

@@ -67,8 +67,35 @@ describe('parseMonitorCommand', () => {
 
   it('rejects unknown projects and malformed URLs', () => {
     const result = parseMonitorCommand('curl https://example.com/install.sh -e javascript:bad -t token');
-    expect(result.errors).toContain('无法从安装脚本地址识别 Lite 或 Komari');
+    expect(result.errors).toContain('无法从安装脚本地址识别 Lite / Komari / CF Server Monitor');
     expect(result.errors).toContain('Endpoint 必须是有效的 http:// 或 https:// 地址');
+  });
+
+  it('detects CF Server Monitor and maps id/secret/url', () => {
+    const result = parseMonitorCommand(
+      "curl -fsSL 'https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh' | sh -s -- install -id=my-id -secret='my secret' -url=https://example.com/update -collect_interval=1 -interval=60"
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.config).toEqual({
+      type: 'cfsm',
+      endpoint: 'https://example.com/update',
+      token: 'my secret',
+      remoteControl: false,
+      agentId: 'my-id'
+    });
+  });
+
+  it('rejects a CF Server Monitor command missing credentials or a bad URL', () => {
+    const missing = parseMonitorCommand(
+      'curl https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh | sh -s -- install -id=abc'
+    );
+    expect(missing.errors).toContain('命令中缺少 -secret（Secret）');
+    expect(missing.errors).toContain('命令中缺少 -url（URL）');
+
+    const badUrl = parseMonitorCommand(
+      'curl https://github.com/huilang-me/cfsm-agent -id=abc -secret=s -url=javascript:bad'
+    );
+    expect(badUrl.errors).toContain('URL 必须是有效的 http:// 或 https:// 地址');
   });
 
   it('allows a deliberate manual type selection with a warning', () => {

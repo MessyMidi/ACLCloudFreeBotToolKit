@@ -47,7 +47,7 @@
           <p>为 ACLClouds 免费 Bot 生成经过约束的 Mihomo + VLESS REALITY + Monitor 部署配置。</p>
         </div>
         <div class="runtime-note" aria-label="运行架构">
-          <span>GO RUNTIME</span><i></i><span>MIHOMO</span><i></i><span>LITE / KOMARI</span>
+          <span>GO RUNTIME</span><i></i><span>MIHOMO</span><i></i><span>LITE / KOMARI / CFSM</span>
         </div>
       </section>
 
@@ -73,18 +73,20 @@
                 <label><input type="radio" name="monitorType" value="auto" checked /><span>自动识别</span></label>
                 <label><input type="radio" name="monitorType" value="lite" /><span>Lite</span></label>
                 <label><input type="radio" name="monitorType" value="komari" /><span>Komari</span></label>
+                <label><input type="radio" name="monitorType" value="cfsm" /><span>CF Server Monitor</span></label>
               </div>
             </fieldset>
 
             <label class="field-label" for="monitor-command">安装命令</label>
-            <textarea id="monitor-command" rows="5" spellcheck="false" autocomplete="off" placeholder="wget -qO- https://raw.githubusercontent.com/nuomiiiii/Lite-agent/main/install.sh | sudo bash -s -- -e https://lite.example.com -t TOKEN --enable-remote-control"></textarea>
+            <textarea id="monitor-command" rows="5" spellcheck="false" autocomplete="off" placeholder="粘贴 Lite / Komari / CF Server Monitor 的一键安装命令，例如：curl -fsSL 'https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh' | sh -s -- install -id=ID -secret='SECRET' -url=https://example.com/update"></textarea>
             <div class="field-error" id="monitor-errors" role="alert"></div>
 
             <div class="parse-result" id="parse-result" hidden>
               <div class="parse-title"><span class="success-mark"><svg><use href="#i-check" /></svg></span><strong id="detected-type">已识别 Lite</strong><span>命令解析完成</span></div>
               <dl>
-                <div><dt>Endpoint</dt><dd id="detected-endpoint"></dd></div>
-                <div><dt>Token</dt><dd><code id="detected-token"></code><button class="reveal-button" id="reveal-token" type="button" aria-label="显示 Token"><svg><use href="#i-eye" /></svg></button></dd></div>
+                <div id="row-agent-id" hidden><dt>Server ID</dt><dd id="detected-agent-id"></dd></div>
+                <div><dt id="label-endpoint">Endpoint</dt><dd id="detected-endpoint"></dd></div>
+                <div><dt id="label-token">Token</dt><dd><code id="detected-token"></code><button class="reveal-button" id="reveal-token" type="button" aria-label="显示 Token"><svg><use href="#i-eye" /></svg></button></dd></div>
               </dl>
               <label class="switch-row readonly" id="remote-row"><span><strong id="remote-title">远程控制</strong><small id="remote-detail">严格按照粘贴命令解析</small></span><input id="remote-control" type="checkbox" disabled /><i></i></label>
               <p class="parse-warning" id="parse-warning"></p>
@@ -177,7 +179,7 @@
         </aside>
       </div>
 
-      <footer><span><span class="status-dot"></span>BUILT FOR ACLCLOUDS FREE BOT</span><span>MIHOMO · VLESS REALITY · LITE / KOMARI</span></footer>
+      <footer><span><span class="status-dot"></span>BUILT FOR ACLCLOUDS FREE BOT</span><span>MIHOMO · VLESS REALITY · LITE / KOMARI / CFSM</span></footer>
     </main>
     <div class="toast" id="toast" role="status" hidden></div>
     <script type="module" src="/src/main.ts"></script>

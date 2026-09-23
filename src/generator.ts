@@ -1,4 +1,4 @@
-import { CLIENT_FINGERPRINTS, TESTED_VERSIONS } from './constants';
+import { CFSM_INSTALL_SCRIPT, CLIENT_FINGERPRINTS, TESTED_VERSIONS } from './constants';
 import type { MonitorConfig, ProxyConfig, ValidationResult } from './types';
 
 function hasControlCharacters(value: string): boolean {
@@ -41,20 +41,31 @@ export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig): strin
     '# Do not set SERVER_IP / SERVER_PORT; ACLClouds injects them.',
     '',
     '# ---------------- Monitor ----------------',
-    `MONITOR_ENABLED=${shellQuote(monitor ? '1' : '0')}`
+    // CF Server Monitor is installed by the Startup Command, not launcher.sh,
+    // so launcher keeps the monitor subsystem disabled for it.
+    `MONITOR_ENABLED=${shellQuote(monitor && monitor.type !== 'cfsm' ? '1' : '0')}`
   ];
 
   if (monitor) {
-    const monitorVersion = TESTED_VERSIONS[monitor.type];
-    lines.push(
-      `MONITOR_TYPE=${shellQuote(monitor.type)}`,
-      `MONITOR_ENDPOINT=${shellQuote(monitor.endpoint)}`,
-      `MONITOR_TOKEN=${shellQuote(monitor.token)}`,
-      `MONITOR_REMOTE_CONTROL=${shellQuote(String(monitor.remoteControl))}`,
-      `MONITOR_VERSION=${shellQuote(monitorVersion.version)}`,
-      `MONITOR_URL=${shellQuote(monitorVersion.url)}`,
-      `MONITOR_SHA256=${shellQuote(monitorVersion.sha256)}`
-    );
+    if (monitor.type === 'cfsm') {
+      lines.push(
+        '# CF Server Monitor: consumed by the Startup Command install script.',
+        `CFSM_ID=${shellQuote(monitor.agentId ?? '')}`,
+        `CFSM_SECRET=${shellQuote(monitor.token)}`,
+        `CFSM_URL=${shellQuote(monitor.endpoint)}`
+      );
+    } else {
+      const monitorVersion = TESTED_VERSIONS[monitor.type];
+      lines.push(
+        `MONITOR_TYPE=${shellQuote(monitor.type)}`,
+        `MONITOR_ENDPOINT=${shellQuote(monitor.endpoint)}`,
+        `MONITOR_TOKEN=${shellQuote(monitor.token)}`,
+        `MONITOR_REMOTE_CONTROL=${shellQuote(String(monitor.remoteControl))}`,
+        `MONITOR_VERSION=${shellQuote(monitorVersion.version)}`,
+        `MONITOR_URL=${shellQuote(monitorVersion.url)}`,
+        `MONITOR_SHA256=${shellQuote(monitorVersion.sha256)}`
+      );
+    }
   }
 
   lines.push(
@@ -83,7 +94,15 @@ export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig): strin
   return lines.join('\n');
 }
 
-export function generateStartupCommand(launcherUrl: string): string {
+export function generateStartupCommand(launcherUrl: string, monitor?: MonitorConfig): string {
   const quotedUrl = shellQuote(launcherUrl);
-  return `LAUNCHER_URL=${quotedUrl}; if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 -o launcher.sh "$LAUNCHER_URL"; else wget -O launcher.sh "$LAUNCHER_URL"; fi && chmod +x launcher.sh && exec bash launcher.sh`;
+  const launcher = `LAUNCHER_URL=${quotedUrl}; if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 -o launcher.sh "$LAUNCHER_URL"; else wget -O launcher.sh "$LAUNCHER_URL"; fi && chmod +x launcher.sh && exec bash launcher.sh`;
+
+  if (monitor?.type !== 'cfsm') return launcher;
+
+  // CF Server Monitor: read the id/secret/url back from config.env (created in
+  // the same working directory by ACLClouds Files) and run the one-click install
+  // before handing off to launcher.sh. Credentials stay in config.env only.
+  const cfsm = `set -a; . ./config.env; set +a; curl -fsSL ${shellQuote(CFSM_INSTALL_SCRIPT)} | sh -s -- install -id="$CFSM_ID" -secret="$CFSM_SECRET" -url="$CFSM_URL"; ${launcher}`;
+  return cfsm;
 }
