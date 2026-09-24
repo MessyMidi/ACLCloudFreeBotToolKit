@@ -285,6 +285,97 @@ func TestCaptchaSolverReturnsVerifiedTokenWithoutLoggingSecrets(t *testing.T) {
 	}
 }
 
+func TestRenewAfterCaptchaUsesCurrentXsrfTokenWithoutStaleMetaToken(t *testing.T) {
+	const (
+		optionToken       = "captcha-option"
+		verificationToken = "captcha-verification"
+	)
+	imageData := patternedCaptchaPNG(t)
+	pixels, width, height, err := decodeCaptchaImage(imageData)
+	if err != nil {
+		t.Fatalf("decode reference image: %v", err)
+	}
+	cols, rows := extractProfiles(pixels, width, height)
+	originalReferences := precomputedRef
+	precomputedRef = []precomputedWord{{word: "Cloud", colProfile: cols, rowProfile: rows}}
+	t.Cleanup(func() { precomputedRef = originalReferences })
+
+	authorized := false
+	renewalCalls := 0
+	captchaPosts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/client" && !authorized:
+			writeJSON(t, w, http.StatusUnauthorized, map[string]any{"message": "Unauthenticated"})
+		case r.URL.Path == "/auth/login" && r.Method == http.MethodGet:
+			http.SetCookie(w, &http.Cookie{Name: "XSRF-TOKEN", Value: "xsrf-login", Path: "/"})
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<meta name="csrf-token" content="stale-meta-token">`))
+		case r.URL.Path == "/auth/login" && r.Method == http.MethodPost:
+			authorized = true
+			http.SetCookie(w, &http.Cookie{Name: "XSRF-TOKEN", Value: "xsrf-active", Path: "/"})
+			http.SetCookie(w, &http.Cookie{Name: "__Host-aclclouds_session", Value: "session", Path: "/"})
+			writeJSON(t, w, http.StatusOK, map[string]any{"ok": true})
+		case r.URL.Path == "/api/client":
+			writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{
+				map[string]any{"object": "server", "attributes": map[string]any{
+					"identifier": "real-id", "uuid": "full-uuid", "name": "My Bot",
+					"expires_at": "2026-09-25T08:00:00Z", "can_renew": true,
+				}},
+			}})
+		case r.URL.Path == "/api/client/servers/real-id/upgrade/renew":
+			renewalCalls++
+			if renewalCalls == 1 {
+				writeJSON(t, w, http.StatusForbidden, map[string]any{"error": "captcha_required"})
+				return
+			}
+			if r.Header.Get("X-XSRF-TOKEN") != "xsrf-after-captcha" || r.Header.Get("X-CSRF-TOKEN") != "" {
+				writeJSON(t, w, 419, map[string]any{"errors": []any{map[string]any{
+					"code": "HttpException", "status": "419", "detail": "CSRF token mismatch.",
+				}}})
+				return
+			}
+			writeJSON(t, w, http.StatusOK, map[string]any{"expires_at": "2026-09-29T08:00:00Z"})
+		case r.URL.Path == "/auth/captcha/challenge" && r.Method == http.MethodGet:
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"id": "challenge-id", "ts": 1727172000, "sig": "signature", "context": "renewal_gate",
+			})
+		case r.URL.Path == "/auth/captcha" && r.Method == http.MethodPost:
+			captchaPosts++
+			if captchaPosts == 1 {
+				writeJSON(t, w, http.StatusOK, map[string]any{
+					"interactive": true, "options": []string{optionToken}, "answer_sig": "answer-signature",
+					"target": "Cloud", "id": "challenge-id", "ts": 1727172000,
+					"sig": "signature", "context": "renewal_gate",
+				})
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "XSRF-TOKEN", Value: "xsrf-after-captcha", Path: "/"})
+			writeJSON(t, w, http.StatusOK, map[string]any{"passed": true, "token": verificationToken})
+		case r.URL.Path == "/auth/captcha/image" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(imageData)
+		case r.URL.Path == "/api/client/servers/real-id":
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"attributes": map[string]any{"expires_at": "2026-09-29T08:00:00Z"},
+			})
+		case strings.HasPrefix(r.URL.Path, "/bot"):
+			writeJSON(t, w, http.StatusOK, map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	result, err := Check(context.Background(), testConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("Check returned error: %v", err)
+	}
+	if !result.Renewed || renewalCalls != 2 {
+		t.Fatalf("unexpected result after CAPTCHA: %+v, renew calls=%d", result, renewalCalls)
+	}
+}
+
 func TestDecodeCaptchaImageRejectsUnexpectedDimensions(t *testing.T) {
 	var data bytes.Buffer
 	if err := png.Encode(&data, image.NewGray(image.Rect(0, 0, 10, 10))); err != nil {
@@ -314,8 +405,8 @@ func TestExpiredSessionUsesPureHTTPLoginAndPersistsCookies(t *testing.T) {
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write([]byte(`<html><head><meta name="csrf-token" content="csrf-value"></head></html>`))
 		case r.URL.Path == "/auth/login" && r.Method == http.MethodPost:
-			if r.Header.Get("X-XSRF-TOKEN") != "xsrf-value" || r.Header.Get("X-CSRF-TOKEN") != "csrf-value" {
-				t.Fatalf("missing CSRF headers: %#v", r.Header)
+			if r.Header.Get("X-XSRF-TOKEN") != "xsrf-value" || r.Header.Get("X-CSRF-TOKEN") != "" {
+				t.Fatalf("request must prefer the current XSRF cookie over the meta CSRF token: %#v", r.Header)
 			}
 			var body map[string]string
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

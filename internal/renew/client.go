@@ -102,8 +102,7 @@ func (s *session) request(ctx context.Context, method, path string, payload any)
 	}
 	if token := s.xsrfToken(); token != "" {
 		req.Header.Set("X-XSRF-TOKEN", token)
-	}
-	if s.csrfToken != "" {
+	} else if s.csrfToken != "" {
 		req.Header.Set("X-CSRF-TOKEN", s.csrfToken)
 	}
 	response, err := s.client.Do(req)
