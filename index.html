@@ -61,7 +61,7 @@
 
       <section class="privacy-strip">
         <span class="privacy-icon"><svg><use href="#i-shield" /></svg></span>
-        <div><strong>配置只留在当前浏览器</strong><p>Token 和表单会保存在此浏览器的 localStorage，便于下次继续使用；不会上传、写入 URL 或发送给服务器。</p><small id="storage-status">下一次修改后自动保存</small></div>
+        <div><strong>配置只留在当前浏览器</strong><p>Token、密码和表单会保存在此浏览器的 localStorage，便于下次继续使用；不会上传或写入 URL。请勿在公共设备启用自动延期。</p><small id="storage-status">下一次修改后自动保存</small></div>
         <div class="privacy-actions"><span class="local-badge"><span class="status-dot"></span>LOCAL STORAGE</span><button id="clear-storage" class="clear-storage" type="button">清除本地配置</button></div>
       </section>
 
@@ -144,9 +144,35 @@
             </fieldset>
           </section>
 
-          <section class="panel section-card update-card">
+          <section class="panel section-card module-card" id="renewal-section">
             <div class="section-heading">
               <span class="section-index">03</span>
+              <div><h2>自动延期</h2><p>每天检查当前免费容器，必要时调用 ACLClouds API</p></div>
+              <label class="module-toggle"><input id="renewal-enabled" data-module-toggle type="checkbox" /><i></i><span>启用</span></label>
+            </div>
+
+            <fieldset class="module-body" id="renewal-fields">
+              <div class="renewal-notice">
+                <strong>只处理当前容器</strong>
+                <p>默认用 ACLClouds 注入的 <code>P_SERVER_UUID</code> 精确匹配 API 返回的服务；不会猜测 UUID，也不会遍历续期账号下的其他服务。</p>
+              </div>
+              <div class="field-grid">
+                <label><span class="field-label">ACLClouds 邮箱 / 用户名</span><input id="acl-username" autocomplete="username" /><small class="field-error" data-renew-error-for="username"></small></label>
+                <label><span class="field-label">ACLClouds 密码</span><input id="acl-password" type="password" autocomplete="current-password" /><small class="field-error" data-renew-error-for="password"></small></label>
+                <label><span class="field-label">Telegram Bot Token <em>可选</em></span><input id="telegram-bot-token" type="password" autocomplete="off" placeholder="留空则仅在 Console 查询" /><small class="field-error" data-renew-error-for="telegramBotToken"></small></label>
+                <label><span class="field-label">Telegram Chat ID <em>可选</em></span><input id="telegram-chat-id" inputmode="numeric" autocomplete="off" placeholder="与 Bot Token 一起填写" /><small class="field-error" data-renew-error-for="telegramChatId"></small></label>
+              </div>
+              <details class="advanced">
+                <summary><span>高级设置</span><small>通常留空</small><svg><use href="#i-chevron" /></svg></summary>
+                <label><span class="field-label">Service ID 覆盖</span><input id="acl-server-id" autocomplete="off" placeholder="留空则使用 P_SERVER_UUID" /><small class="field-hint">仅当运行环境未注入 UUID，或 API 返回值无法匹配时填写真实 identifier / UUID。</small><small class="field-error" data-renew-error-for="serverId"></small></label>
+              </details>
+              <p class="field-hint renewal-hint">启动时检查一次，之后每 24 小时加少量随机延迟检查。结果始终写入本地日志，可在 Console 输入 <code>7</code> 查询；填写完整 Telegram 配置后才额外推送。</p>
+            </fieldset>
+          </section>
+
+          <section class="panel section-card update-card">
+            <div class="section-heading">
+              <span class="section-index">04</span>
               <div><h2>自动更新</h2><p>跟随 GitHub Stable Channel</p></div>
             </div>
             <label class="switch-row update-switch"><span><strong>自动获取稳定版</strong><small>启动时检查，运行中约每 6 小时检查；更新失败继续使用本地版本</small></span><input id="auto-update" type="checkbox" checked /><i></i></label>
@@ -188,13 +214,13 @@
               <li><span>2</span><div><strong>创建 config.env</strong><p>Create File → 名称填 <code>config</code> → 类型选 Env (.env)，粘贴配置。</p></div></li>
               <li><span>3</span><div><strong>设置 Startup Command</strong><p>进入 Startup，粘贴上方生成的固定 bootstrap 命令；以后无需修改版本 URL。</p></div></li>
               <li><span>4</span><div><strong>Restart</strong><p>等待 Console 显示 Server marked as running 和已启用服务状态；启用代理时会输出 VLESS 链接。</p></div></li>
-              <li><span>5</span><div><strong>随时找回链接</strong><p>启用代理后，在 Console 输入 <code>2</code> 即可重新显示。</p></div></li>
+              <li><span>5</span><div><strong>Console 查询</strong><p>启用代理后输入 <code>2</code> 找回链接；启用自动延期后输入 <code>7</code> 查看最近检查结果。</p></div></li>
             </ol>
           </section>
         </aside>
       </div>
 
-      <footer><span><span class="status-dot"></span>BUILT FOR ACLCLOUDS FREE BOT</span><span>MIHOMO · VLESS REALITY · LITE / KOMARI</span></footer>
+      <footer><span><span class="status-dot"></span>BUILT FOR ACLCLOUDS FREE BOT</span><span>MIHOMO · VLESS REALITY · LITE / KOMARI · AUTO RENEW</span></footer>
     </main>
     <div class="toast" id="toast" role="status" hidden></div>
     <script type="module" src="/src/main.ts"></script>

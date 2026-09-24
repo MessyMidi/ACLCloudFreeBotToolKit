@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-LAUNCHER_VERSION='0.4.0'
+LAUNCHER_VERSION='0.5.0'
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$BASE_DIR/bin"
@@ -26,6 +26,7 @@ MIHOMO_CONFIG="$CONFIG_DIR/mihomo.yaml"
 SECRETS_FILE="$DATA_DIR/mihomo-secrets.env"
 MIHOMO_LOG="$LOG_DIR/mihomo.log"
 MONITOR_LOG="$LOG_DIR/monitor.log"
+RENEW_LOG="$LOG_DIR/renew.log"
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR" "$MIHOMO_HOME"
 
@@ -42,6 +43,56 @@ elif [[ -f "$BASE_DIR/.env" ]]; then
 else
     die "No config.env or .env found in $BASE_DIR"
 fi
+
+normalize_env_line_endings() {
+    local env_file="$1"
+    local temporary="${env_file}.line-endings.$$"
+    local backup_dir="$DATA_DIR/bootstrap/config-backups"
+    local backup_file line changed=0
+
+    : > "$temporary"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" == *$'\r' ]]; then
+            line="${line%$'\r'}"
+            changed=1
+        fi
+        if [[ "$line" == *$'\r'* ]]; then
+            rm -f "$temporary"
+            die "config.env contains an embedded carriage return; remove control characters and try again"
+        fi
+        printf '%s\n' "$line" >> "$temporary"
+    done < "$env_file"
+
+    if [[ "$changed" -eq 0 ]]; then
+        rm -f "$temporary"
+        return 0
+    fi
+
+    mkdir -p "$backup_dir" || {
+        rm -f "$temporary"
+        die "Unable to create the config.env backup directory"
+    }
+    backup_file="$backup_dir/$(basename "$env_file").line-endings.$$.bak"
+    cp "$env_file" "$backup_file" || {
+        rm -f "$temporary"
+        die "Unable to back up config.env before line-ending normalization"
+    }
+    chmod 600 "$backup_file" "$temporary" || {
+        rm -f "$temporary"
+        die "Unable to protect the config.env backup"
+    }
+    bash -n "$temporary" || {
+        rm -f "$temporary"
+        die "config.env is not valid Bash syntax after line-ending normalization"
+    }
+    mv -f "$temporary" "$env_file" || {
+        rm -f "$temporary"
+        die "Unable to atomically normalize config.env line endings"
+    }
+    log 'Configuration line endings normalized to LF'
+}
+
+normalize_env_line_endings "$ENV_FILE"
 
 set -a
 # shellcheck disable=SC1090
@@ -69,10 +120,18 @@ MONITOR_TYPE="${MONITOR_TYPE:-komari}"
 MONITOR_ENDPOINT="${MONITOR_ENDPOINT:-${KOMARI_ENDPOINT:-}}"
 MONITOR_TOKEN="${MONITOR_TOKEN:-${KOMARI_TOKEN:-}}"
 MONITOR_REMOTE_CONTROL="${MONITOR_REMOTE_CONTROL:-false}"
+AUTO_RENEW_ENABLED="${AUTO_RENEW_ENABLED:-0}"
+
+case "${AUTO_RENEW_ENABLED,,}" in
+    1|true|yes|on|enable|enabled) RENEW_ENABLED=1 ;;
+    0|false|no|off|disable|disabled|'') RENEW_ENABLED=0 ;;
+    *) die "AUTO_RENEW_ENABLED must be a boolean value" ;;
+esac
 
 [[ "$MIHOMO_ENABLED" == "0" || "$MIHOMO_ENABLED" == "1" ]] || die "MIHOMO_ENABLED must be 0 or 1"
 [[ "$MONITOR_ENABLED" == "0" || "$MONITOR_ENABLED" == "1" ]] || die "MONITOR_ENABLED must be 0 or 1"
-[[ "$MIHOMO_ENABLED" == "1" || "$MONITOR_ENABLED" == "1" ]] || die "At least one service must be enabled"
+[[ "$MIHOMO_ENABLED" == "1" || "$MONITOR_ENABLED" == "1" || "$RENEW_ENABLED" == "1" ]] || \
+    die "At least one of Mihomo, Monitor, or automatic renewal must be enabled"
 
 if [[ "$MIHOMO_ENABLED" == "1" ]]; then
     : "${SERVER_IP:?ACLClouds did not provide SERVER_IP}"
@@ -488,6 +547,12 @@ show_status() {
         printf 'Server : %s:%s\n' "$SERVER_IP" "$SERVER_PORT"
     fi
 
+    if [[ "$RENEW_ENABLED" == "1" ]]; then
+        printf 'Renewal : ENABLED (managed by bootstrap)\n'
+    else
+        printf 'Renewal : DISABLED\n'
+    fi
+
     if [[ -r /sys/fs/cgroup/memory.current && -r /sys/fs/cgroup/memory.max ]]; then
         printf 'cgroup : %s / %s bytes\n' \
             "$(cat /sys/fs/cgroup/memory.current)" \
@@ -497,9 +562,23 @@ show_status() {
     printf '\n'
 }
 
+show_renew_log() {
+    if [[ "$RENEW_ENABLED" != "1" ]]; then
+        printf '\nAutomatic renewal is disabled in config.env.\n\n'
+        return
+    fi
+    printf '\n--- Automatic renewal log ---\n'
+    if [[ -s "$RENEW_LOG" ]]; then
+        show_log_tail "$RENEW_LOG" 120
+    else
+        printf 'No renewal check result is available yet.\n'
+    fi
+    printf '\n'
+}
+
 show_menu() {
     printf '%s\n' '=========================================='
-    printf '%s\n' ' ACLClouds Mihomo + Monitor OneClick'
+    printf '%s\n' ' ACLClouds Bot Toolkit'
     printf '%s\n' '=========================================='
     printf '%s\n' '[1] 服务状态'
     printf '%s\n' '[2] 代理链接'
@@ -507,6 +586,7 @@ show_menu() {
     printf '%s\n' '[4] Monitor 日志（最近 120 行）'
     printf '%s\n' '[5] 重启 Mihomo'
     printf '%s\n' '[6] 重启 Monitor'
+    printf '%s\n' '[7] 自动延期日志（最近 120 行）'
     printf '%s\n' '[0] 显示菜单'
     printf '%s\n' '------------------------------------------'
     printf '%s' '请输入数字: '
@@ -557,6 +637,9 @@ while true; do
         6)
             restart_monitor
             show_status
+            ;;
+        7)
+            show_renew_log
             ;;
         0)
             show_menu

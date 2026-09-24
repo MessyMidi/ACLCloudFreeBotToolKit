@@ -96,6 +96,7 @@ main { width: min(1320px, calc(100% - 56px)); margin: 0 auto; padding: 51px 0 24
 
 fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .choice-field legend, .field-label { display: block; margin: 0 0 9px; color: #607269; font-size: 10px; font-weight: 550; }
+.field-label em { margin-left: 4px; color: var(--muted); font-size: 8px; font-style: normal; font-weight: 500; }
 .segmented { display: inline-flex; padding: 3px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 7px; background: var(--soft); }
 .segmented label { cursor: pointer; }
 .segmented input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
@@ -113,6 +114,11 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .field-error { min-height: 0; color: var(--danger); font-size: 9px; line-height: 1.6; }
 .field-error p { margin: 8px 0 0; }
 .field-grid .field-error:not(:empty) { display: block; margin-top: 6px; }
+.renewal-notice { margin-bottom: 16px; padding: 12px 14px; border: 1px solid #d9ece1; border-radius: 8px; background: var(--soft); }
+.renewal-notice strong { color: var(--green); font-size: 9px; font-weight: 600; }
+.renewal-notice p { margin: 5px 0 0; color: var(--muted); font-size: 8px; line-height: 1.7; }
+.renewal-notice code, .renewal-hint code { color: var(--green); font: 8px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.renewal-hint { margin-bottom: 0; }
 
 .parse-result { margin-top: 16px; overflow: hidden; border: 1px solid #d9ece1; border-radius: 9px; background: var(--soft); }
 .parse-title { display: flex; align-items: center; gap: 8px; padding: 13px 14px; border-bottom: 1px solid var(--line); }
@@ -158,6 +164,7 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .advanced summary svg { width: 13px; height: 13px; color: var(--muted); transition: transform .2s; }
 .advanced[open] summary svg { transform: rotate(180deg); }
 .advanced-fields { padding-top: 16px; }
+.advanced > label { display: block; padding-top: 16px; }
 .field-hint { margin: 13px 0 0; color: var(--muted); font-size: 8px; line-height: 1.7; }
 .version-list { padding-top: 12px; }
 .version-list > div { display: flex; justify-content: space-between; align-items: center; padding: 9px 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; }
@@ -223,6 +230,7 @@ body.dark { --bg: #15221c; --surface: #1b2c23; --text: #d9e6dd; --muted: #8aa393
 .dark .protocol-badge { border-color: #31513d; }
 .dark input, .dark textarea, .dark select { color: #c5d6cc; }
 .dark .parse-result { border-color: #31513d; }
+.dark .renewal-notice { border-color: #31513d; }
 .dark .code-card { border-color: #35453d; background: #101a16; }
 .dark .code-heading { background: #15221c; }
 .dark .copy-button { background: #203229; }

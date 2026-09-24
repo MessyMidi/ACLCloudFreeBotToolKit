@@ -12,7 +12,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'archive-pulse', 'node_modules'] },
+  { ignores: ['dist', 'build', '.tools', 'archive-pulse', 'deepseek', 'repo', 'node_modules'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -22,5 +22,9 @@ export default tseslint.config(
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-non-null-assertion': 'off'
     }
+  },
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: globals.node }
   }
 );

@@ -9,11 +9,11 @@
 
 import './styles.css';
 import { DEFAULT_PROXY, TESTED_VERSIONS } from './constants';
-import { generateEnv, generateStartupCommand, validateProxy } from './generator';
+import { generateEnv, generateStartupCommand, validateProxy, validateRenewal } from './generator';
 import { maskToken, parseMonitorCommand } from './monitor-parser';
 import { FORM_STORAGE_KEY, parseStoredState } from './storage';
 import type { StoredFormState } from './storage';
-import type { MonitorConfig, MonitorSelection, ProxyConfig } from './types';
+import type { MonitorConfig, MonitorSelection, ProxyConfig, RenewalConfig } from './types';
 
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const form = byId<HTMLFormElement>('generator-form');
@@ -26,6 +26,7 @@ const revealButton = byId<HTMLButtonElement>('reveal-token');
 const monitorEnabled = byId<HTMLInputElement>('monitor-enabled');
 const proxyEnabled = byId<HTMLInputElement>('proxy-enabled');
 const autoUpdate = byId<HTMLInputElement>('auto-update');
+const renewalEnabled = byId<HTMLInputElement>('renewal-enabled');
 let parsedMonitor: MonitorConfig | undefined;
 let tokenVisible = false;
 let toastTimer = 0;
@@ -85,6 +86,16 @@ function proxyConfig(): ProxyConfig {
   };
 }
 
+function renewalConfig(): RenewalConfig {
+  return {
+    username: byId<HTMLInputElement>('acl-username').value.trim(),
+    password: byId<HTMLInputElement>('acl-password').value,
+    serverId: byId<HTMLInputElement>('acl-server-id').value.trim(),
+    telegramBotToken: byId<HTMLInputElement>('telegram-bot-token').value.trim(),
+    telegramChatId: byId<HTMLInputElement>('telegram-chat-id').value.trim()
+  };
+}
+
 function clearProxyErrors(): void {
   document.querySelectorAll<HTMLElement>('[data-error-for]').forEach((element) => { element.textContent = ''; });
 }
@@ -93,6 +104,18 @@ function renderProxyErrors(errors: ReturnType<typeof validateProxy>['errors']): 
   clearProxyErrors();
   Object.entries(errors).forEach(([field, message]) => {
     const element = document.querySelector<HTMLElement>(`[data-error-for="${field}"]`);
+    if (element) element.textContent = message;
+  });
+}
+
+function clearRenewalErrors(): void {
+  document.querySelectorAll<HTMLElement>('[data-renew-error-for]').forEach((element) => { element.textContent = ''; });
+}
+
+function renderRenewalErrors(errors: ReturnType<typeof validateRenewal>['errors']): void {
+  clearRenewalErrors();
+  Object.entries(errors).forEach(([field, message]) => {
+    const element = document.querySelector<HTMLElement>(`[data-renew-error-for="${field}"]`);
     if (element) element.textContent = message;
   });
 }
@@ -116,24 +139,29 @@ function generate(): void {
   parseCommand();
   const monitor = monitorEnabled.checked ? parsedMonitor : undefined;
   const proxy = proxyEnabled.checked ? proxyConfig() : undefined;
+  const renewal = renewalEnabled.checked ? renewalConfig() : undefined;
   const validation = proxy ? validateProxy(proxy) : { errors: {}, valid: true };
+  const renewalValidation = renewal ? validateRenewal(renewal) : { errors: {}, valid: true };
   renderProxyErrors(validation.errors);
+  renderRenewalErrors(renewalValidation.errors);
   const selectionError = byId('selection-error');
-  selectionError.textContent = !monitorEnabled.checked && !proxyEnabled.checked ? '请至少启用 Monitor 或代理中的一个' : '';
-  if ((!monitorEnabled.checked && !proxyEnabled.checked) || (monitorEnabled.checked && !monitor) || !validation.valid) {
+  const allModulesDisabled = !monitorEnabled.checked && !proxyEnabled.checked && !renewalEnabled.checked;
+  selectionError.textContent = allModulesDisabled ? '请至少启用 Monitor、代理或自动延期中的一个' : '';
+  if (allModulesDisabled || (monitorEnabled.checked && !monitor) || !validation.valid || !renewalValidation.valid) {
     clearGeneratedOutput('请修正标记的问题');
     byId('output-status').textContent = '请修正标记的问题';
     document.querySelector('.field-error:not(:empty)')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
-  byId('env-output').textContent = generateEnv(monitor, proxy);
+  byId('env-output').textContent = generateEnv(monitor, proxy, renewal);
   byId('startup-output').textContent = generateStartupCommand(bootstrapUrl(), autoUpdate.checked);
   byId('empty-output').hidden = true;
   byId('generated-output').hidden = false;
   const enabledServices = [
     monitor ? (monitor.type === 'lite' ? 'Lite' : 'Komari') : '',
-    proxy ? 'VLESS + REALITY' : ''
+    proxy ? 'VLESS + REALITY' : '',
+    renewal ? '自动延期' : ''
   ].filter(Boolean).join(' + ');
   byId('output-status').textContent = `${enabledServices} · 配置已就绪`;
   byId('output-panel').classList.add('ready');
@@ -200,6 +228,7 @@ function syncModuleState(sectionId: string, fieldsId: string, toggle: HTMLInputE
     else showErrors([]);
   }
   if (toggle === proxyEnabled && !toggle.checked) clearProxyErrors();
+  if (toggle === renewalEnabled && !toggle.checked) clearRenewalErrors();
 }
 
 function applyTheme(dark: boolean): void {
@@ -219,13 +248,15 @@ function saveTheme(dark: boolean): void {
 
 function currentStoredState(): StoredFormState {
   return {
-    version: 1,
+    version: 2,
     monitorEnabled: monitorEnabled.checked,
     monitorType: selectedMonitorType(),
     monitorCommand: commandInput.value,
     proxyEnabled: proxyEnabled.checked,
     proxy: proxyConfig(),
-    autoUpdate: autoUpdate.checked
+    autoUpdate: autoUpdate.checked,
+    renewalEnabled: renewalEnabled.checked,
+    renewal: renewalConfig()
   };
 }
 
@@ -247,6 +278,7 @@ function applyStoredState(state: StoredFormState): void {
   monitorEnabled.checked = state.monitorEnabled;
   proxyEnabled.checked = state.proxyEnabled;
   autoUpdate.checked = state.autoUpdate;
+  renewalEnabled.checked = state.renewalEnabled;
   commandInput.value = state.monitorCommand;
   const monitorType = form.querySelector<HTMLInputElement>(`input[name="monitorType"][value="${state.monitorType}"]`);
   if (monitorType) monitorType.checked = true;
@@ -254,6 +286,11 @@ function applyStoredState(state: StoredFormState): void {
   byId<HTMLInputElement>('destination').value = state.proxy.destination;
   byId<HTMLSelectElement>('fingerprint').value = state.proxy.fingerprint;
   byId<HTMLInputElement>('remark').value = state.proxy.remark;
+  byId<HTMLInputElement>('acl-username').value = state.renewal.username;
+  byId<HTMLInputElement>('acl-password').value = state.renewal.password;
+  byId<HTMLInputElement>('acl-server-id').value = state.renewal.serverId;
+  byId<HTMLInputElement>('telegram-bot-token').value = state.renewal.telegramBotToken;
+  byId<HTMLInputElement>('telegram-chat-id').value = state.renewal.telegramChatId;
 }
 
 function resetSavedState(): void {
@@ -269,8 +306,10 @@ function resetSavedState(): void {
   parseResult.hidden = true;
   showErrors([]);
   clearProxyErrors();
+  clearRenewalErrors();
   syncModuleState('monitor-section', 'monitor-fields', monitorEnabled);
   syncModuleState('proxy-section', 'proxy-fields', proxyEnabled);
+  syncModuleState('renewal-section', 'renewal-fields', renewalEnabled);
   clearGeneratedOutput('本地配置已清除');
   byId('storage-status').textContent = '已清除；下一次修改会重新保存';
   toast('本地配置已清除');
@@ -282,6 +321,7 @@ form.addEventListener('change', scheduleFormSave);
 form.querySelectorAll<HTMLInputElement>('input[name="monitorType"]').forEach((input) => input.addEventListener('change', parseCommand));
 monitorEnabled.addEventListener('change', () => syncModuleState('monitor-section', 'monitor-fields', monitorEnabled));
 proxyEnabled.addEventListener('change', () => syncModuleState('proxy-section', 'proxy-fields', proxyEnabled));
+renewalEnabled.addEventListener('change', () => syncModuleState('renewal-section', 'renewal-fields', renewalEnabled));
 revealButton.addEventListener('click', () => { tokenVisible = !tokenVisible; updateTokenPreview(); });
 form.addEventListener('submit', (event) => { event.preventDefault(); generate(); });
 document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => button.addEventListener('click', () => void copyText(button.dataset.copy as 'env' | 'startup', button)));
@@ -306,6 +346,7 @@ if (storedState) {
 }
 syncModuleState('monitor-section', 'monitor-fields', monitorEnabled);
 syncModuleState('proxy-section', 'proxy-fields', proxyEnabled);
+syncModuleState('renewal-section', 'renewal-fields', renewalEnabled);
 if (commandInput.value.trim()) parseCommand();
 const savedTheme = readTheme();
 applyTheme(savedTheme ? savedTheme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches);

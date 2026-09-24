@@ -1,6 +1,11 @@
 node_modules/
 dist/
+build/
+release/
+.tools/
 .vite/
 *.log
 *.tsbuildinfo
 archive-pulse/
+deepseek/
+repo/
