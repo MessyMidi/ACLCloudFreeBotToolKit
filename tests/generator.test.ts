@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { CLIENT_FINGERPRINTS } from '../src/constants';
-import { generateEnv, generateStartupCommand, shellQuote, validateProxy } from '../src/generator';
+import { generateEnv, generateStartupCommand, shellQuote, validateProxy, validateRenewal } from '../src/generator';
 import { parseStoredState } from '../src/storage';
 
 const monitor = {
@@ -23,6 +23,13 @@ const proxy = {
   destination: 'www.cloudflare.com:443',
   fingerprint: 'chrome',
   remark: 'ACLClouds-Free'
+};
+const renewal = {
+  username: 'person@example.com',
+  password: "safe'password;$()",
+  serverId: '',
+  telegramBotToken: '123456789:AA_example-token',
+  telegramChatId: '123456789'
 };
 
 describe('shellQuote', () => {
@@ -38,11 +45,13 @@ describe('shellQuote', () => {
 describe('generateEnv', () => {
   it('uses the unified monitor schema and fixed versions', () => {
     const output = generateEnv(monitor, proxy);
-    expect(output).toContain("CONFIG_SCHEMA_VERSION='1'");
+    expect(output).toContain("CONFIG_SCHEMA_VERSION='2'");
+    expect(output).toContain("AUTO_RENEW_ENABLED='0'");
     expect(output).toContain("MONITOR_TYPE='lite'");
     expect(output).toContain("MONITOR_TOKEN='abc'\\''def;$()'");
     expect(output).toContain("MIHOMO_VERSION='v1.19.31'");
     expect(output).not.toContain('SERVER_IP=');
+    expect(output).not.toContain('\r');
   });
 
   it('keeps credentials out of the startup command', () => {
@@ -74,8 +83,24 @@ describe('generateEnv', () => {
     expect(output).not.toContain('REALITY_SNI=');
   });
 
+  it('generates an automatic-renewal-only config without Monitor or Mihomo', () => {
+    const output = generateEnv(undefined, undefined, { ...renewal, telegramBotToken: '', telegramChatId: '' });
+    expect(output).toContain("AUTO_RENEW_ENABLED='1'");
+    expect(output).toContain("MONITOR_ENABLED='0'");
+    expect(output).toContain("MIHOMO_ENABLED='0'");
+    expect(output).toContain("TELEGRAM_BOT_TOKEN=''");
+  });
+
   it('refuses to generate a config with every service disabled', () => {
-    expect(() => generateEnv(undefined, undefined)).toThrow('至少启用一个服务');
+    expect(() => generateEnv(undefined, undefined)).toThrow('至少启用 Monitor、Mihomo 或自动延期中的一个');
+  });
+
+  it('safely emits opt-in automatic renewal credentials', () => {
+    const output = generateEnv(monitor, proxy, renewal);
+    expect(output).toContain("AUTO_RENEW_ENABLED='1'");
+    expect(output).toContain("ACL_PASSWORD='safe'\\''password;$()'");
+    expect(output).toContain("TELEGRAM_CHAT_ID='123456789'");
+    expect(generateStartupCommand('https://tool.example/bootstrap.sh', true)).not.toContain(renewal.password);
   });
 
   it('emits CF Server Monitor variables while keeping launcher monitor disabled', () => {
@@ -120,11 +145,47 @@ describe('parseStoredState', () => {
     }));
     expect(state?.monitorCommand).toContain('secret');
     expect(state?.autoUpdate).toBe(true);
+    expect(state?.version).toBe(2);
+    expect(state?.renewalEnabled).toBe(false);
+  });
+
+  it('restores schema 2 automatic renewal fields locally', () => {
+    const state = parseStoredState(JSON.stringify({
+      version: 2,
+      monitorEnabled: true,
+      monitorType: 'auto',
+      monitorCommand: '',
+      proxyEnabled: true,
+      proxy,
+      autoUpdate: true,
+      renewalEnabled: true,
+      renewal
+    }));
+    expect(state?.renewal.password).toBe(renewal.password);
+    expect(state?.renewalEnabled).toBe(true);
   });
 
   it('ignores malformed or unknown local snapshots', () => {
     expect(parseStoredState('{broken')).toBeUndefined();
     expect(parseStoredState(JSON.stringify({ version: 2 }))).toBeUndefined();
+  });
+});
+
+describe('validateRenewal', () => {
+  it('accepts a complete automatic renewal configuration', () => {
+    expect(validateRenewal(renewal).valid).toBe(true);
+  });
+
+  it('allows Telegram delivery to be omitted', () => {
+    expect(validateRenewal({ ...renewal, telegramBotToken: '', telegramChatId: '' }).valid).toBe(true);
+  });
+
+  it('requires Telegram fields as a pair and rejects unsafe service ids', () => {
+    const result = validateRenewal({ ...renewal, serverId: 'bad/id', telegramChatId: 'chat' });
+    expect(result.errors.serverId).toBeTruthy();
+    expect(result.errors.telegramChatId).toBeTruthy();
+    expect(validateRenewal({ ...renewal, telegramChatId: '' }).errors.telegramChatId).toBeTruthy();
+    expect(validateRenewal({ ...renewal, telegramBotToken: '' }).errors.telegramBotToken).toBeTruthy();
   });
 });
 

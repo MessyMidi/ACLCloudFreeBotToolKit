@@ -13,10 +13,15 @@ import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const dist = resolve(root, 'dist');
-const assets = ['bootstrap.sh', 'launcher.sh'];
+const scripts = ['bootstrap.sh', 'launcher.sh'];
+const binary = 'acl-renew-linux-amd64';
+const assets = [...scripts, binary];
 
 await mkdir(dist, { recursive: true });
-await Promise.all(assets.map((asset) => copyFile(resolve(root, asset), resolve(dist, asset))));
+await Promise.all([
+  ...scripts.map((asset) => copyFile(resolve(root, asset), resolve(dist, asset))),
+  copyFile(resolve(root, 'build', binary), resolve(dist, binary))
+]);
 
 const checksums = await Promise.all(assets.map(async (asset) => {
   const contents = await readFile(resolve(dist, asset));

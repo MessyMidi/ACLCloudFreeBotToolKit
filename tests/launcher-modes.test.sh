@@ -39,6 +39,18 @@ EOF
     chmod +x "$path"
 }
 
+wait_for_output() {
+    local pattern="$1"
+    local file="$2"
+    local attempts=0
+    while (( attempts < 100 )); do
+        grep -q "$pattern" "$file" 2>/dev/null && return 0
+        sleep 0.1
+        attempts=$((attempts + 1))
+    done
+    return 1
+}
+
 run_for_startup() {
     local dir="$1"
     shift
@@ -47,9 +59,24 @@ run_for_startup() {
         exec "$@" bash launcher.sh </dev/null >output.log 2>&1
     ) &
     local pid=$!
-    # Both-services mode performs two one-second health checks in sequence.
-    # Leave headroom for slower CI and Git-for-Windows process startup.
-    sleep 4
+    # The first prompt is printed only after status and the optional VLESS link,
+    # so this is a deterministic completion signal even on slower CI hosts.
+    wait_for_output '请输入数字' "$dir/output.log" || true
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+}
+
+run_for_startup_with_input() {
+    local dir="$1"
+    local input="$2"
+    local expected="$3"
+    shift 3
+    (
+        cd "$dir"
+        exec "$@" bash launcher.sh <"$input" >output.log 2>&1
+    ) &
+    local pid=$!
+    wait_for_output "$expected" "$dir/output.log" || true
     kill -TERM "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
 }
@@ -149,15 +176,49 @@ assert_contains 'Monitor started (lite' "$both_dir/output.log"
 assert_contains 'vless://' "$both_dir/output.log"
 assert_contains '^change this part$' "$both_dir/output.log"
 
+renew_dir="$(make_fixture renewal-only)"
+cat > "$renew_dir/config.env" <<'EOF'
+MIHOMO_ENABLED='0'
+MONITOR_ENABLED='0'
+AUTO_RENEW_ENABLED='1'
+EOF
+mkdir -p "$renew_dir/logs"
+printf '%s\n' '[renew] previous check succeeded' > "$renew_dir/logs/renew.log"
+printf '7\n' > "$renew_dir/console.input"
+run_for_startup_with_input "$renew_dir" console.input 'previous check succeeded' env
+assert_contains '^change this part$' "$renew_dir/output.log"
+assert_contains 'Renewal : ENABLED' "$renew_dir/output.log"
+assert_contains 'Automatic renewal log' "$renew_dir/output.log"
+assert_contains 'previous check succeeded' "$renew_dir/output.log"
+
+# Pterodactyl's file editor and Windows clipboard paths may persist config.env
+# with CRLF line endings. The launcher must treat it exactly like an LF file.
+crlf_dir="$(make_fixture crlf-config)"
+printf "CONFIG_SCHEMA_VERSION='2'\r\nMIHOMO_ENABLED='0'\r\nMONITOR_ENABLED='0'\r\nAUTO_RENEW_ENABLED='1'\r\n" \
+    > "$crlf_dir/config.env"
+run_for_startup "$crlf_dir" env
+assert_contains '^change this part$' "$crlf_dir/output.log"
+assert_contains 'Renewal : ENABLED' "$crlf_dir/output.log"
+if od -An -tx1 "$crlf_dir/config.env" | grep -Eq '(^|[[:space:]])0d([[:space:]]|$)'; then
+    printf 'launcher left CR bytes in config.env\n' >&2
+    exit 1
+fi
+if grep -q "command not found" "$crlf_dir/output.log"; then
+    printf 'CRLF config.env was interpreted as shell commands\n' >&2
+    cat "$crlf_dir/output.log" >&2
+    exit 1
+fi
+
 disabled_dir="$(make_fixture all-disabled)"
 cat > "$disabled_dir/config.env" <<'EOF'
 MIHOMO_ENABLED='0'
 MONITOR_ENABLED='0'
+AUTO_RENEW_ENABLED='0'
 EOF
 if (cd "$disabled_dir" && bash launcher.sh >output.log 2>&1); then
     printf 'all-disabled mode unexpectedly succeeded\n' >&2
     exit 1
 fi
-assert_contains 'At least one service must be enabled' "$disabled_dir/output.log"
+assert_contains 'At least one of Mihomo, Monitor, or automatic renewal must be enabled' "$disabled_dir/output.log"
 
 printf 'launcher mode tests passed\n'

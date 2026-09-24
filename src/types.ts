@@ -30,6 +30,14 @@ export interface ProxyConfig {
   remark: string;
 }
 
+export interface RenewalConfig {
+  username: string;
+  password: string;
+  serverId: string;
+  telegramBotToken: string;
+  telegramChatId: string;
+}
+
 export interface ParseResult {
   config?: MonitorConfig;
   errors: string[];
@@ -38,5 +46,10 @@ export interface ParseResult {
 
 export interface ValidationResult {
   errors: Partial<Record<keyof ProxyConfig, string>>;
+  valid: boolean;
+}
+
+export interface RenewalValidationResult {
+  errors: Partial<Record<keyof RenewalConfig, string>>;
   valid: boolean;
 }
