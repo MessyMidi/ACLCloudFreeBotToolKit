@@ -1,4 +1,12 @@
 <!doctype html>
+<!--
+  ACLCloudFreeBotToolKit
+  Copyright (C) 2026 MessyMidi
+
+  SPDX-License-Identifier: AGPL-3.0-only
+  Additional terms under AGPLv3 Section 7:
+  see /ADDITIONAL_TERMS.md
+-->
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
@@ -34,7 +42,7 @@
         <span>ACL<span>Clouds</span><small>FREE BOT TOOLKIT</small></span>
       </a>
       <nav class="top-actions" aria-label="页面操作">
-        <a class="header-link" href="./launcher.sh" target="_blank"><svg><use href="#i-github" /></svg><span>Launcher</span></a>
+        <a class="header-link" href="./bootstrap.sh" target="_blank"><svg><use href="#i-github" /></svg><span>Bootstrap</span></a>
         <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅色"><svg><use href="#i-moon" /></svg></button>
       </nav>
     </header>
@@ -53,8 +61,8 @@
 
       <section class="privacy-strip">
         <span class="privacy-icon"><svg><use href="#i-shield" /></svg></span>
-        <div><strong>配置只留在当前浏览器</strong><p>Token 和配置均在本地解析、生成；没有后端请求、分析脚本或表单提交，也不会写入本地存储。</p></div>
-        <span class="local-badge"><span class="status-dot"></span>CLIENT-SIDE</span>
+        <div><strong>配置只留在当前浏览器</strong><p>Token 和表单会保存在此浏览器的 localStorage，便于下次继续使用；不会上传、写入 URL 或发送给服务器。</p><small id="storage-status">下一次修改后自动保存</small></div>
+        <div class="privacy-actions"><span class="local-badge"><span class="status-dot"></span>LOCAL STORAGE</span><button id="clear-storage" class="clear-storage" type="button">清除本地配置</button></div>
       </section>
 
       <div class="workspace">
@@ -138,6 +146,15 @@
             </fieldset>
           </section>
 
+          <section class="panel section-card update-card">
+            <div class="section-heading">
+              <span class="section-index">03</span>
+              <div><h2>自动更新</h2><p>跟随 GitHub Stable Channel</p></div>
+            </div>
+            <label class="switch-row update-switch"><span><strong>自动获取稳定版</strong><small>启动时检查，运行中约每 6 小时检查；更新失败继续使用本地版本</small></span><input id="auto-update" type="checkbox" checked /><i></i></label>
+            <p class="field-hint update-hint">关闭后 Startup Command 会生成 <code>--AUTO_UPDATE=disable</code>；首次部署仍会下载运行所需文件。</p>
+          </section>
+
           <div class="generator-actions">
             <p class="selection-error" id="selection-error" role="alert"></p>
             <button class="generate-button" type="submit"><span>生成部署配置</span><svg><use href="#i-arrow" /></svg></button>
@@ -171,7 +188,7 @@
             <ol>
               <li><span>1</span><div><strong>打开 Files</strong><p>进入 ACLClouds Bot 的文件管理器。</p></div></li>
               <li><span>2</span><div><strong>创建 config.env</strong><p>Create File → 名称填 <code>config</code> → 类型选 Env (.env)，粘贴配置。</p></div></li>
-              <li><span>3</span><div><strong>设置 Startup Command</strong><p>进入 Startup，粘贴上方生成的命令。</p></div></li>
+              <li><span>3</span><div><strong>设置 Startup Command</strong><p>进入 Startup，粘贴上方生成的固定 bootstrap 命令；以后无需修改版本 URL。</p></div></li>
               <li><span>4</span><div><strong>Restart</strong><p>等待 Console 显示 Server marked as running 和已启用服务状态；启用代理时会输出 VLESS 链接。</p></div></li>
               <li><span>5</span><div><strong>随时找回链接</strong><p>启用代理后，在 Console 输入 <code>2</code> 即可重新显示。</p></div></li>
             </ol>

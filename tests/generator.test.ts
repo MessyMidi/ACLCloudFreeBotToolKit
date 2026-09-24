@@ -1,6 +1,16 @@
+/*
+ * ACLCloudFreeBotToolKit
+ * Copyright (C) 2026 MessyMidi
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Additional terms under AGPLv3 Section 7:
+ * see /ADDITIONAL_TERMS.md
+ */
+
 import { describe, expect, it } from 'vitest';
 import { CLIENT_FINGERPRINTS } from '../src/constants';
 import { generateEnv, generateStartupCommand, shellQuote, validateProxy } from '../src/generator';
+import { parseStoredState } from '../src/storage';
 
 const monitor = {
   type: 'lite' as const,
@@ -28,6 +38,7 @@ describe('shellQuote', () => {
 describe('generateEnv', () => {
   it('uses the unified monitor schema and fixed versions', () => {
     const output = generateEnv(monitor, proxy);
+    expect(output).toContain("CONFIG_SCHEMA_VERSION='1'");
     expect(output).toContain("MONITOR_TYPE='lite'");
     expect(output).toContain("MONITOR_TOKEN='abc'\\''def;$()'");
     expect(output).toContain("MIHOMO_VERSION='v1.19.31'");
@@ -35,10 +46,16 @@ describe('generateEnv', () => {
   });
 
   it('keeps credentials out of the startup command', () => {
-    const output = generateStartupCommand('https://tool.example/launcher.sh');
-    expect(output).toContain('https://tool.example/launcher.sh');
+    const output = generateStartupCommand('https://tool.example/bootstrap.sh', true);
+    expect(output).toContain('https://tool.example/bootstrap.sh');
+    expect(output).toContain('--AUTO_UPDATE=enable');
     expect(output).not.toContain(monitor.token);
     expect(output).not.toContain(monitor.endpoint);
+  });
+
+  it('can disable bootstrap updates without putting the setting in config.env', () => {
+    expect(generateStartupCommand('https://tool.example/bootstrap.sh', false)).toContain('--AUTO_UPDATE=disable');
+    expect(generateEnv(monitor, proxy)).not.toContain('AUTO_UPDATE=');
   });
 
   it('generates a proxy-only config without monitor credentials', () => {
@@ -75,7 +92,7 @@ describe('generateEnv', () => {
   });
 
   it('prepends the CF install script to the startup command referencing config.env vars', () => {
-    const output = generateStartupCommand('https://tool.example/launcher.sh', {
+    const output = generateStartupCommand('https://tool.example/bootstrap.sh', true, {
       type: 'cfsm',
       endpoint: 'https://example.com/update',
       token: 'sekret',
@@ -83,10 +100,31 @@ describe('generateEnv', () => {
       agentId: 'srv-1'
     });
     expect(output).toContain("curl -fsSL 'https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh' | sh -s -- install -id=\"$CFSM_ID\" -secret=\"$CFSM_SECRET\" -url=\"$CFSM_URL\"");
-    expect(output).toContain('exec bash launcher.sh');
+    expect(output).toContain('exec bash bootstrap.sh --AUTO_UPDATE=enable');
     // Real credentials never leak into the startup command; only config.env holds them.
     expect(output).not.toContain('sekret');
     expect(output).not.toContain('srv-1');
+  });
+});
+
+describe('parseStoredState', () => {
+  it('restores a valid local-only form snapshot including the monitor command', () => {
+    const state = parseStoredState(JSON.stringify({
+      version: 1,
+      monitorEnabled: true,
+      monitorType: 'auto',
+      monitorCommand: 'install -e https://lite.example.com -t secret',
+      proxyEnabled: false,
+      proxy,
+      autoUpdate: true
+    }));
+    expect(state?.monitorCommand).toContain('secret');
+    expect(state?.autoUpdate).toBe(true);
+  });
+
+  it('ignores malformed or unknown local snapshots', () => {
+    expect(parseStoredState('{broken')).toBeUndefined();
+    expect(parseStoredState(JSON.stringify({ version: 2 }))).toBeUndefined();
   });
 });
 

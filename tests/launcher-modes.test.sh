@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+
+# ACLCloudFreeBotToolKit
+# Copyright (C) 2026 MessyMidi
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms under AGPLv3 Section 7:
+# see /ADDITIONAL_TERMS.md
+
 set -Eeuo pipefail
 
 # Git for Windows does not always prepend its Unix tool directories when bash
@@ -81,11 +89,12 @@ MONITOR_TOKEN='test-token'
 MONITOR_REMOTE_CONTROL='false'
 EOF
 make_long_running_agent "$monitor_dir/bin/lite-agent"
-run_for_startup "$monitor_dir" env
+run_for_startup "$monitor_dir" env LAUNCHER_READY_FILE="$monitor_dir/launcher.ready" LAUNCHER_GENERATION='test-generation'
 assert_contains 'Monitor started (lite' "$monitor_dir/output.log"
 assert_contains 'Mihomo : DISABLED' "$monitor_dir/output.log"
 assert_contains '^change this part$' "$monitor_dir/output.log"
 assert_after 'Startup completed' '^change this part$' "$monitor_dir/output.log"
+assert_contains '^test-generation$' "$monitor_dir/launcher.ready"
 if grep -q 'startup-probe candidate' "$monitor_dir/output.log"; then
     printf 'diagnostic startup probe unexpectedly remained enabled\n' >&2
     exit 1

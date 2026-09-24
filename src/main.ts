@@ -1,7 +1,18 @@
+/*
+ * ACLCloudFreeBotToolKit
+ * Copyright (C) 2026 MessyMidi
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Additional terms under AGPLv3 Section 7:
+ * see /ADDITIONAL_TERMS.md
+ */
+
 import './styles.css';
 import { DEFAULT_PROXY, MONITOR_LABELS, TESTED_VERSIONS } from './constants';
 import { generateEnv, generateStartupCommand, validateProxy } from './generator';
 import { maskToken, parseMonitorCommand } from './monitor-parser';
+import { FORM_STORAGE_KEY, parseStoredState } from './storage';
+import type { StoredFormState } from './storage';
 import type { MonitorConfig, MonitorSelection, ProxyConfig } from './types';
 
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -14,9 +25,11 @@ const remoteRow = byId<HTMLElement>('remote-row');
 const revealButton = byId<HTMLButtonElement>('reveal-token');
 const monitorEnabled = byId<HTMLInputElement>('monitor-enabled');
 const proxyEnabled = byId<HTMLInputElement>('proxy-enabled');
+const autoUpdate = byId<HTMLInputElement>('auto-update');
 let parsedMonitor: MonitorConfig | undefined;
 let tokenVisible = false;
 let toastTimer = 0;
+let saveTimer = 0;
 
 function selectedMonitorType(): MonitorSelection {
   return (form.elements.namedItem('monitorType') as RadioNodeList).value as MonitorSelection;
@@ -92,8 +105,8 @@ function renderProxyErrors(errors: ReturnType<typeof validateProxy>['errors']): 
   });
 }
 
-function launcherUrl(): string {
-  return 'https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/download/v0.3.0/launcher.sh';
+function bootstrapUrl(): string {
+  return 'https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/latest/download/bootstrap.sh';
 }
 
 function clearGeneratedOutput(status = '配置已更改，请重新生成'): void {
@@ -123,7 +136,7 @@ function generate(): void {
   }
 
   byId('env-output').textContent = generateEnv(monitor, proxy);
-  byId('startup-output').textContent = generateStartupCommand(launcherUrl(), monitor);
+  byId('startup-output').textContent = generateStartupCommand(bootstrapUrl(), autoUpdate.checked, monitor);
   byId('empty-output').hidden = true;
   byId('generated-output').hidden = false;
   const enabledServices = [
@@ -212,8 +225,68 @@ function saveTheme(dark: boolean): void {
   try { localStorage.setItem('aclclouds:theme', dark ? 'dark' : 'light'); } catch { /* Theme persistence is optional. */ }
 }
 
+function currentStoredState(): StoredFormState {
+  return {
+    version: 1,
+    monitorEnabled: monitorEnabled.checked,
+    monitorType: selectedMonitorType(),
+    monitorCommand: commandInput.value,
+    proxyEnabled: proxyEnabled.checked,
+    proxy: proxyConfig(),
+    autoUpdate: autoUpdate.checked
+  };
+}
+
+function saveFormState(): void {
+  try {
+    localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(currentStoredState()));
+    byId('storage-status').textContent = '已自动保存在此浏览器';
+  } catch {
+    byId('storage-status').textContent = '浏览器拒绝了本地保存';
+  }
+}
+
+function scheduleFormSave(): void {
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(saveFormState, 200);
+}
+
+function applyStoredState(state: StoredFormState): void {
+  monitorEnabled.checked = state.monitorEnabled;
+  proxyEnabled.checked = state.proxyEnabled;
+  autoUpdate.checked = state.autoUpdate;
+  commandInput.value = state.monitorCommand;
+  const monitorType = form.querySelector<HTMLInputElement>(`input[name="monitorType"][value="${state.monitorType}"]`);
+  if (monitorType) monitorType.checked = true;
+  byId<HTMLInputElement>('sni').value = state.proxy.sni;
+  byId<HTMLInputElement>('destination').value = state.proxy.destination;
+  byId<HTMLSelectElement>('fingerprint').value = state.proxy.fingerprint;
+  byId<HTMLInputElement>('remark').value = state.proxy.remark;
+}
+
+function resetSavedState(): void {
+  try { localStorage.removeItem(FORM_STORAGE_KEY); } catch { /* The form can still be reset in memory. */ }
+  form.reset();
+  commandInput.value = '';
+  Object.entries(DEFAULT_PROXY).forEach(([key, value]) => {
+    const element = document.getElementById(key) as HTMLInputElement | HTMLSelectElement | null;
+    if (element) element.value = value;
+  });
+  parsedMonitor = undefined;
+  tokenVisible = false;
+  parseResult.hidden = true;
+  showErrors([]);
+  clearProxyErrors();
+  syncModuleState('monitor-section', 'monitor-fields', monitorEnabled);
+  syncModuleState('proxy-section', 'proxy-fields', proxyEnabled);
+  clearGeneratedOutput('本地配置已清除');
+  byId('storage-status').textContent = '已清除；下一次修改会重新保存';
+  toast('本地配置已清除');
+}
+
 commandInput.addEventListener('input', parseCommand);
-form.addEventListener('input', () => clearGeneratedOutput());
+form.addEventListener('input', () => { clearGeneratedOutput(); scheduleFormSave(); });
+form.addEventListener('change', scheduleFormSave);
 form.querySelectorAll<HTMLInputElement>('input[name="monitorType"]').forEach((input) => input.addEventListener('change', parseCommand));
 monitorEnabled.addEventListener('change', () => syncModuleState('monitor-section', 'monitor-fields', monitorEnabled));
 proxyEnabled.addEventListener('change', () => syncModuleState('proxy-section', 'proxy-fields', proxyEnabled));
@@ -225,13 +298,22 @@ byId('theme-toggle').addEventListener('click', () => {
   saveTheme(dark);
   applyTheme(dark);
 });
+byId('clear-storage').addEventListener('click', resetSavedState);
 
 renderVersions();
+let storedState: StoredFormState | undefined;
+try { storedState = parseStoredState(localStorage.getItem(FORM_STORAGE_KEY)); } catch { storedState = undefined; }
+if (storedState) {
+  applyStoredState(storedState);
+  byId('storage-status').textContent = '已恢复此浏览器保存的配置';
+} else {
+  Object.entries(DEFAULT_PROXY).forEach(([key, value]) => {
+    const element = document.getElementById(key) as HTMLInputElement | HTMLSelectElement | null;
+    if (element) element.value = value;
+  });
+}
 syncModuleState('monitor-section', 'monitor-fields', monitorEnabled);
 syncModuleState('proxy-section', 'proxy-fields', proxyEnabled);
+if (commandInput.value.trim()) parseCommand();
 const savedTheme = readTheme();
 applyTheme(savedTheme ? savedTheme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches);
-Object.entries(DEFAULT_PROXY).forEach(([key, value]) => {
-  const element = document.getElementById(key) as HTMLInputElement | HTMLSelectElement | null;
-  if (element) element.value = value;
-});
