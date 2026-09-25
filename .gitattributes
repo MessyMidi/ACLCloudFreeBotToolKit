@@ -1,0 +1,18 @@
+* text=auto
+
+/.gitattributes text eol=lf
+/.gitignore text eol=lf
+
+*.sh text eol=lf
+*.go text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.svg text eol=lf
+*.env* text eol=lf

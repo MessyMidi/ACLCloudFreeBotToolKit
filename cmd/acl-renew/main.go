@@ -19,7 +19,7 @@ import (
 	"github.com/MessyMidi/ACLCloudFreeBotToolKit/internal/renew"
 )
 
-const version = "0.5.0"
+const version = "0.6.0-beta.1"
 
 func main() {
 	log.SetFlags(0)

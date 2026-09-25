@@ -33,6 +33,15 @@ https://github.com/nuomiiiii/Lite-agent
 
 Lite Agent remains subject to its upstream copyright and license terms.
 
+## CF Server Monitor Agent
+
+Project: huilang-me/cfsm-agent
+
+Repository:
+https://github.com/huilang-me/cfsm-agent
+
+CF Server Monitor Agent is distributed under the MIT License. ACLCloudFreeBotToolKit may download and launch it as a separate executable; it is not relicensed under the ACLCloudFreeBotToolKit license.
+
 ## Disclaimer
 
 All third-party project names, trademarks, copyrights, and other rights remain the property of their respective owners.

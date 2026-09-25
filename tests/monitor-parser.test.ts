@@ -76,8 +76,53 @@ describe('parseMonitorCommand', () => {
 
   it('rejects unknown projects and malformed URLs', () => {
     const result = parseMonitorCommand('curl https://example.com/install.sh -e javascript:bad -t token');
-    expect(result.errors).toContain('无法从安装脚本地址识别 Lite 或 Komari');
+    expect(result.errors).toContain('无法从安装脚本地址识别 Lite / Komari / CF Server Monitor');
     expect(result.errors).toContain('Endpoint 必须是有效的 http:// 或 https:// 地址');
+  });
+
+  it('detects CF Server Monitor and preserves official runtime options', () => {
+    const result = parseMonitorCommand(
+      "curl -fsSL 'https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh' | sh -s -- install -id=server-id -secret='my secret' -url=https://worker.example.com/update -collect_interval=2 -interval=60 -connection_mode=http -ping_mode=icmp -reset_day=0 -ct='ct.example.com:80' -interface='eth0,eth1' -auto_update=1"
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toContain('CFSM Agent 自更新将关闭，由本工具固定版本并校验 SHA256');
+    expect(result.config).toEqual({
+      type: 'cfsm',
+      endpoint: 'https://worker.example.com/update',
+      token: 'my secret',
+      remoteControl: false,
+      agentId: 'server-id',
+      options: {
+        collectInterval: 2,
+        reportInterval: 60,
+        connectionMode: 'http',
+        pingMode: 'icmp',
+        resetDay: 0,
+        debug: false,
+        ctNode: 'ct.example.com:80',
+        cuNode: '',
+        cmNode: '',
+        bdNode: '',
+        node1: '',
+        node2: '',
+        node3: '',
+        node4: '',
+        networkInterface: 'eth0,eth1'
+      }
+    });
+  });
+
+  it('rejects unsafe or unsupported CF Server Monitor install options', () => {
+    const missing = parseMonitorCommand(
+      'curl https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh | sh -s -- install -id=abc'
+    );
+    expect(missing.errors).toContain('命令中缺少 -secret（Secret）');
+    expect(missing.errors).toContain('命令中缺少 -url（URL）');
+
+    const unsupported = parseMonitorCommand(
+      'curl https://github.com/huilang-me/cfsm-agent -id=abc -secret=s -url=https://worker.example/update -rx_correction=1'
+    );
+    expect(unsupported.errors).toContain('ACLClouds 托管模式暂不支持一次性流量校正参数，请移除 -rx_correction / -tx_correction');
   });
 
   it('allows a deliberate manual type selection with a warning', () => {

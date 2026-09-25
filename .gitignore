@@ -4,8 +4,14 @@ build/
 release/
 .tools/
 .vite/
+.codex-remote/
 *.log
 *.tsbuildinfo
+config.env
+.env
+data/
+logs/
+workspace/
 archive-pulse/
 deepseek/
 repo/

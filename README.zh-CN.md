@@ -4,16 +4,17 @@
 
 # ACLCloudFreeBotToolKit
 
-面向 ACLClouds Free Bot 的配置生成器和运行工具。通过浏览器生成 `config.env` 与 Startup Command，在非 root 容器中运行 Mihomo、Lite/Komari 和自动延期任务。
+面向 ACLClouds Free Bot 的配置生成器和运行工具。通过浏览器生成 `config.env` 与 Startup Command，在非 root 容器中运行 Mihomo、Lite、Komari、CF Server Monitor 和自动延期任务。
 
 [Releases](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases) · [Issues](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/issues)
 
 ## 功能
 
 - 部署 Mihomo + VLESS REALITY，首次启动时生成并保存连接参数。
-- 接入 Lite 或 Komari 探针，可单独启用监控。
+- 接入 Lite、Komari 或 CF Server Monitor 探针，可单独启用监控。
 - 可选的 ACLClouds 自动延期，支持 CAPTCHA 处理和 Telegram 通知。
 - 自动下载、校验并更新运行文件；更新失败时继续使用本地版本。
+- Mihomo 和 Monitor 异常退出后按指数退避自动拉起，连续五次失败后在 Console 明确提示并停止自动重试。
 - Mihomo、监控与自动延期可以独立启用。
 
 当前发布资源适用于 Linux AMD64。
@@ -37,7 +38,7 @@ npm run dev
 
 ## 配置与数据
 
-生成器没有后端。表单内容保存在当前站点的浏览器 `localStorage` 中，不会写入 URL；页面内可以清除已保存的配置。
+生成器没有后端。普通表单内容保存在当前站点的浏览器 `localStorage` 中，不会写入 URL；页面内可以清除已保存的配置。自动延期的账号、密码、Telegram Bot Token 和 Chat ID 默认不持久化，只有勾选“在此浏览器记住密码和 Token 等”后才会写入 `localStorage`。
 
 启用自动延期后，账号信息会写入 `config.env`。请勿公开该文件，也不要在公共设备上保存配置。运行时认证缓存和日志保存在容器的 `data/` 与 `logs/` 目录中。
 

@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-LAUNCHER_VERSION='0.5.0'
+LAUNCHER_VERSION='0.6.0-beta.1'
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$BASE_DIR/bin"
@@ -22,11 +22,14 @@ MIHOMO_HOME="$DATA_DIR/mihomo-home"
 MIHOMO_BIN="$BIN_DIR/mihomo"
 KOMARI_BIN="$BIN_DIR/komari-agent"
 LITE_BIN="$BIN_DIR/lite-agent"
+CFSM_BIN="$BIN_DIR/cf-probe"
 MIHOMO_CONFIG="$CONFIG_DIR/mihomo.yaml"
+CFSM_CONFIG="$CONFIG_DIR/cfsm.conf"
 SECRETS_FILE="$DATA_DIR/mihomo-secrets.env"
 MIHOMO_LOG="$LOG_DIR/mihomo.log"
 MONITOR_LOG="$LOG_DIR/monitor.log"
 RENEW_LOG="$LOG_DIR/renew.log"
+MIHOMO_INSTALL_STATE="$DATA_DIR/mihomo.install-state"
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR" "$MIHOMO_HOME"
 
@@ -104,7 +107,9 @@ set +a
 MIHOMO_ENABLED="${MIHOMO_ENABLED:-1}"
 MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.31}"
 MIHOMO_URL="${MIHOMO_URL:-https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-v1-${MIHOMO_VERSION}.gz}"
+MIHOMO_SHA256="${MIHOMO_SHA256:-d4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114}"
 MIHOMO_FALLBACK_URL="${MIHOMO_FALLBACK_URL:-https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz}"
+MIHOMO_FALLBACK_SHA256="${MIHOMO_FALLBACK_SHA256:-04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc}"
 
 MIHOMO_LOGLEVEL="${MIHOMO_LOGLEVEL:-info}"
 MIHOMO_REMARK="${MIHOMO_REMARK:-ACLClouds-Free}"
@@ -121,6 +126,9 @@ MONITOR_ENDPOINT="${MONITOR_ENDPOINT:-${KOMARI_ENDPOINT:-}}"
 MONITOR_TOKEN="${MONITOR_TOKEN:-${KOMARI_TOKEN:-}}"
 MONITOR_REMOTE_CONTROL="${MONITOR_REMOTE_CONTROL:-false}"
 AUTO_RENEW_ENABLED="${AUTO_RENEW_ENABLED:-0}"
+WATCHDOG_MAX_RESTARTS="${WATCHDOG_MAX_RESTARTS:-5}"
+WATCHDOG_BASE_DELAY_SECONDS="${WATCHDOG_BASE_DELAY_SECONDS:-1}"
+WATCHDOG_STABLE_SECONDS="${WATCHDOG_STABLE_SECONDS:-300}"
 
 case "${AUTO_RENEW_ENABLED,,}" in
     1|true|yes|on|enable|enabled) RENEW_ENABLED=1 ;;
@@ -130,6 +138,9 @@ esac
 
 [[ "$MIHOMO_ENABLED" == "0" || "$MIHOMO_ENABLED" == "1" ]] || die "MIHOMO_ENABLED must be 0 or 1"
 [[ "$MONITOR_ENABLED" == "0" || "$MONITOR_ENABLED" == "1" ]] || die "MONITOR_ENABLED must be 0 or 1"
+[[ "$WATCHDOG_MAX_RESTARTS" =~ ^[0-9]+$ ]] && (( WATCHDOG_MAX_RESTARTS >= 1 && WATCHDOG_MAX_RESTARTS <= 10 )) || die "WATCHDOG_MAX_RESTARTS must be between 1 and 10"
+[[ "$WATCHDOG_BASE_DELAY_SECONDS" =~ ^[0-9]+$ ]] && (( WATCHDOG_BASE_DELAY_SECONDS <= 60 )) || die "WATCHDOG_BASE_DELAY_SECONDS must be between 0 and 60"
+[[ "$WATCHDOG_STABLE_SECONDS" =~ ^[0-9]+$ ]] && (( WATCHDOG_STABLE_SECONDS >= 1 && WATCHDOG_STABLE_SECONDS <= 86400 )) || die "WATCHDOG_STABLE_SECONDS must be between 1 and 86400"
 [[ "$MIHOMO_ENABLED" == "1" || "$MONITOR_ENABLED" == "1" || "$RENEW_ENABLED" == "1" ]] || \
     die "At least one of Mihomo, Monitor, or automatic renewal must be enabled"
 
@@ -158,10 +169,45 @@ if [[ "$MONITOR_ENABLED" == "1" ]]; then
             MONITOR_SHA256="${MONITOR_SHA256:-${KOMARI_SHA256:-78c28d89e523816baea010c0ed0714f245f508ffdaca0540f5c9f230f7053c8c}}"
             MONITOR_BIN="$KOMARI_BIN"
             ;;
+        cfsm)
+            MONITOR_ENDPOINT="${MONITOR_ENDPOINT:-${CFSM_URL:-}}"
+            MONITOR_TOKEN="${MONITOR_TOKEN:-${CFSM_SECRET:-}}"
+            MONITOR_AGENT_ID="${MONITOR_AGENT_ID:-${CFSM_ID:-}}"
+            MONITOR_VERSION="${MONITOR_VERSION:-v1.0.18}"
+            MONITOR_URL="${MONITOR_URL:-https://github.com/huilang-me/cfsm-agent/releases/download/${MONITOR_VERSION}/cf-probe-linux-amd64}"
+            MONITOR_SHA256="${MONITOR_SHA256:-757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa}"
+            MONITOR_BIN="$CFSM_BIN"
+            CFSM_COLLECT_INTERVAL="${CFSM_COLLECT_INTERVAL:-0}"
+            CFSM_REPORT_INTERVAL="${CFSM_REPORT_INTERVAL:-60}"
+            CFSM_CONNECTION_MODE="${CFSM_CONNECTION_MODE:-auto}"
+            CFSM_PING_MODE="${CFSM_PING_MODE:-tcp}"
+            CFSM_RESET_DAY="${CFSM_RESET_DAY:-1}"
+            CFSM_DEBUG="${CFSM_DEBUG:-0}"
+            CFSM_CT_NODE="${CFSM_CT_NODE:-}"
+            CFSM_CU_NODE="${CFSM_CU_NODE:-}"
+            CFSM_CM_NODE="${CFSM_CM_NODE:-}"
+            CFSM_BD_NODE="${CFSM_BD_NODE:-}"
+            CFSM_NODE_1="${CFSM_NODE_1:-}"
+            CFSM_NODE_2="${CFSM_NODE_2:-}"
+            CFSM_NODE_3="${CFSM_NODE_3:-}"
+            CFSM_NODE_4="${CFSM_NODE_4:-}"
+            CFSM_INTERFACE="${CFSM_INTERFACE:-}"
+
+            : "${MONITOR_AGENT_ID:?Set MONITOR_AGENT_ID in config.env}"
+            [[ "$CFSM_COLLECT_INTERVAL" =~ ^[0-9]+$ ]] || die "CFSM_COLLECT_INTERVAL must be an integer"
+            [[ "$CFSM_REPORT_INTERVAL" =~ ^[0-9]+$ ]] || die "CFSM_REPORT_INTERVAL must be an integer"
+            [[ "$CFSM_RESET_DAY" =~ ^[0-9]+$ ]] || die "CFSM_RESET_DAY must be an integer"
+            (( CFSM_REPORT_INTERVAL >= 1 )) || die "CFSM_REPORT_INTERVAL must be at least 1"
+            (( CFSM_RESET_DAY <= 31 )) || die "CFSM_RESET_DAY must be between 0 and 31"
+            [[ "$CFSM_CONNECTION_MODE" == "auto" || "$CFSM_CONNECTION_MODE" == "http" ]] || die "CFSM_CONNECTION_MODE must be auto or http"
+            [[ "$CFSM_PING_MODE" == "tcp" || "$CFSM_PING_MODE" == "icmp" ]] || die "CFSM_PING_MODE must be tcp or icmp"
+            [[ "$CFSM_DEBUG" == "0" || "$CFSM_DEBUG" == "1" ]] || die "CFSM_DEBUG must be 0 or 1"
+            ;;
         *)
-            die "MONITOR_TYPE must be lite or komari"
+            die "MONITOR_TYPE must be lite, komari, or cfsm"
             ;;
     esac
+    MONITOR_INSTALL_STATE="$DATA_DIR/monitor-${MONITOR_TYPE}.install-state"
 fi
 
 # ---------------- Helpers ----------------
@@ -190,6 +236,48 @@ verify_sha256() {
     local expected="$2"
     [[ -n "$expected" ]] || return 0
     printf '%s  %s\n' "$expected" "$file" | sha256sum -c -
+}
+
+file_sha256() {
+    sha256sum "$1" | awk '{print $1}'
+}
+
+install_spec_sha256() {
+    printf '%s\0' "$@" | sha256sum | awk '{print $1}'
+}
+
+install_state_value() {
+    local state_file="$1"
+    local key="$2"
+    sed -n "s/^${key}=//p" "$state_file" 2>/dev/null | sed -n '1p'
+}
+
+write_install_state() {
+    local state_file="$1"
+    local spec_sha256="$2"
+    local binary="$3"
+    local temporary="${state_file}.tmp.$$"
+
+    {
+        printf 'SPEC_SHA256=%s\n' "$spec_sha256"
+        printf 'BINARY_SHA256=%s\n' "$(file_sha256 "$binary")"
+    } > "$temporary"
+    chmod 600 "$temporary"
+    mv -f "$temporary" "$state_file"
+}
+
+install_state_matches() {
+    local state_file="$1"
+    local spec_sha256="$2"
+    local binary="$3"
+    local expected_binary actual_binary
+
+    [[ -x "$binary" && -f "$state_file" ]] || return 1
+    [[ "$(install_state_value "$state_file" SPEC_SHA256)" == "$spec_sha256" ]] || return 1
+    expected_binary="$(install_state_value "$state_file" BINARY_SHA256)"
+    [[ -n "$expected_binary" ]] || return 1
+    actual_binary="$(file_sha256 "$binary")"
+    [[ "$actual_binary" == "$expected_binary" ]]
 }
 
 is_alive() {
@@ -239,21 +327,64 @@ show_log_tail() {
 # ---------------- Install Mihomo ----------------
 
 install_mihomo() {
-    [[ -x "$MIHOMO_BIN" ]] && return 0
-
     command -v gzip >/dev/null 2>&1 || die "gzip is required but not available"
 
-    local archive="$DATA_DIR/mihomo.gz"
+    local archive="$DATA_DIR/mihomo.gz.$$"
+    local candidate="${MIHOMO_BIN}.candidate.$$"
+    local spec_sha256 version_line
+    local had_existing=0
+    spec_sha256="$(install_spec_sha256 mihomo "$MIHOMO_VERSION" "$MIHOMO_URL" "$MIHOMO_SHA256" "$MIHOMO_FALLBACK_URL" "$MIHOMO_FALLBACK_SHA256")"
 
-    if ! download "$MIHOMO_URL" "$archive"; then
-        warn "Primary Mihomo build download failed; trying compatible build"
-        download "$MIHOMO_FALLBACK_URL" "$archive"
+    if install_state_matches "$MIHOMO_INSTALL_STATE" "$spec_sha256" "$MIHOMO_BIN"; then
+        return 0
     fi
 
-    gzip -dc "$archive" > "${MIHOMO_BIN}.tmp"
-    chmod +x "${MIHOMO_BIN}.tmp"
-    mv -f "${MIHOMO_BIN}.tmp" "$MIHOMO_BIN"
+    if [[ -x "$MIHOMO_BIN" ]]; then
+        had_existing=1
+        if [[ ! -f "$MIHOMO_INSTALL_STATE" ]]; then
+            version_line="$("$MIHOMO_BIN" -v 2>/dev/null | sed -n '1p' || true)"
+            if [[ "$version_line" == *"$MIHOMO_VERSION"* ]]; then
+                write_install_state "$MIHOMO_INSTALL_STATE" "$spec_sha256" "$MIHOMO_BIN"
+                log "Existing Mihomo matches $MIHOMO_VERSION; install state recorded"
+                return 0
+            fi
+        fi
+        log "Mihomo install metadata changed; downloading $MIHOMO_VERSION"
+    fi
+
+    if ! download "$MIHOMO_URL" "$archive" || ! verify_sha256 "$archive" "$MIHOMO_SHA256"; then
+        rm -f "$archive"
+        warn "Primary Mihomo build download or checksum failed; trying compatible build"
+        if ! download "$MIHOMO_FALLBACK_URL" "$archive" || ! verify_sha256 "$archive" "$MIHOMO_FALLBACK_SHA256"; then
+            rm -f "$archive" "$candidate"
+            if [[ "$had_existing" -eq 1 ]]; then
+                warn "Mihomo update failed; continuing with the existing binary and retrying next launch"
+                return 0
+            fi
+            die "Unable to download and verify Mihomo"
+        fi
+    fi
+
+    if ! gzip -dc "$archive" > "$candidate"; then
+        rm -f "$archive" "$candidate"
+        if [[ "$had_existing" -eq 1 ]]; then
+            warn "Mihomo archive extraction failed; continuing with the existing binary"
+            return 0
+        fi
+        die "Mihomo archive extraction failed"
+    fi
     rm -f "$archive"
+    chmod +x "$candidate"
+    if ! "$candidate" -v >/dev/null 2>&1; then
+        rm -f "$candidate"
+        if [[ "$had_existing" -eq 1 ]]; then
+            warn "Downloaded Mihomo failed its smoke test; continuing with the existing binary"
+            return 0
+        fi
+        die "Downloaded Mihomo failed its smoke test"
+    fi
+    mv -f "$candidate" "$MIHOMO_BIN"
+    write_install_state "$MIHOMO_INSTALL_STATE" "$spec_sha256" "$MIHOMO_BIN"
 
     log "Mihomo installed: $("$MIHOMO_BIN" -v | sed -n '1p')"
 }
@@ -261,13 +392,72 @@ install_mihomo() {
 # ---------------- Install Monitor ----------------
 
 install_monitor() {
-    [[ -x "$MONITOR_BIN" ]] && return 0
+    local candidate="${MONITOR_BIN}.candidate.$$"
+    local spec_sha256 actual_sha256
+    local had_existing=0
+    spec_sha256="$(install_spec_sha256 monitor "$MONITOR_TYPE" "$MONITOR_VERSION" "$MONITOR_URL" "$MONITOR_SHA256")"
 
-    download "$MONITOR_URL" "$MONITOR_BIN"
-    verify_sha256 "$MONITOR_BIN" "$MONITOR_SHA256"
-    chmod +x "$MONITOR_BIN"
+    if install_state_matches "$MONITOR_INSTALL_STATE" "$spec_sha256" "$MONITOR_BIN"; then
+        return 0
+    fi
+
+    if [[ -x "$MONITOR_BIN" ]]; then
+        had_existing=1
+        if [[ ! -f "$MONITOR_INSTALL_STATE" ]]; then
+            actual_sha256="$(file_sha256 "$MONITOR_BIN")"
+            if [[ -z "$MONITOR_SHA256" || "$actual_sha256" == "$MONITOR_SHA256" ]]; then
+                write_install_state "$MONITOR_INSTALL_STATE" "$spec_sha256" "$MONITOR_BIN"
+                log "Existing Monitor Agent matches $MONITOR_TYPE $MONITOR_VERSION; install state recorded"
+                return 0
+            fi
+        fi
+        log "Monitor install metadata changed; downloading $MONITOR_TYPE $MONITOR_VERSION"
+    fi
+
+    if ! download "$MONITOR_URL" "$candidate" || ! verify_sha256 "$candidate" "$MONITOR_SHA256"; then
+        rm -f "$candidate"
+        if [[ "$had_existing" -eq 1 ]]; then
+            warn "Monitor update failed; continuing with the existing binary and retrying next launch"
+            return 0
+        fi
+        die "Unable to download and verify Monitor Agent"
+    fi
+    [[ -s "$candidate" ]] || die "Downloaded Monitor Agent is empty"
+    chmod +x "$candidate"
+    mv -f "$candidate" "$MONITOR_BIN"
+    write_install_state "$MONITOR_INSTALL_STATE" "$spec_sha256" "$MONITOR_BIN"
 
     log "Monitor Agent installed ($MONITOR_TYPE $MONITOR_VERSION)"
+}
+
+generate_cfsm_config() {
+    [[ "$MONITOR_ENABLED" == "1" && "$MONITOR_TYPE" == "cfsm" ]] || return 0
+
+    local temporary="${CFSM_CONFIG}.tmp.$$"
+    {
+        printf 'SERVER_ID=%s\n' "$MONITOR_AGENT_ID"
+        printf 'SECRET=%s\n' "$MONITOR_TOKEN"
+        printf 'WORKER_URL=%s\n' "$MONITOR_ENDPOINT"
+        printf 'COLLECT_INTERVAL=%s\n' "$CFSM_COLLECT_INTERVAL"
+        printf 'REPORT_INTERVAL=%s\n' "$CFSM_REPORT_INTERVAL"
+        printf 'CT_NODE=%s\n' "$CFSM_CT_NODE"
+        printf 'CU_NODE=%s\n' "$CFSM_CU_NODE"
+        printf 'CM_NODE=%s\n' "$CFSM_CM_NODE"
+        printf 'BD_NODE=%s\n' "$CFSM_BD_NODE"
+        printf 'NODE_1=%s\n' "$CFSM_NODE_1"
+        printf 'NODE_2=%s\n' "$CFSM_NODE_2"
+        printf 'NODE_3=%s\n' "$CFSM_NODE_3"
+        printf 'NODE_4=%s\n' "$CFSM_NODE_4"
+        printf 'INTERFACE=%s\n' "$CFSM_INTERFACE"
+        printf 'RESET_DAY=%s\n' "$CFSM_RESET_DAY"
+        printf 'CONNECTION_MODE=%s\n' "$CFSM_CONNECTION_MODE"
+        printf 'PING_MODE=%s\n' "$CFSM_PING_MODE"
+        printf 'AUTO_UPDATE=0\n'
+        printf 'UPDATE_PROXY=\n'
+        printf 'CONFIG_MD5=none\n'
+    } > "$temporary"
+    chmod 600 "$temporary"
+    mv -f "$temporary" "$CFSM_CONFIG"
 }
 
 if [[ "$MIHOMO_ENABLED" == "1" ]]; then
@@ -278,6 +468,7 @@ if [[ "$MONITOR_ENABLED" == "1" ]]; then
     : "${MONITOR_ENDPOINT:?Set MONITOR_ENDPOINT in config.env}"
     : "${MONITOR_TOKEN:?Set MONITOR_TOKEN in config.env}"
     install_monitor
+    generate_cfsm_config
 fi
 
 # ---------------- Persistent credentials ----------------
@@ -374,6 +565,14 @@ fi
 
 MIHOMO_PID=""
 MONITOR_PID=""
+MIHOMO_WATCHDOG_RESTARTS=0
+MONITOR_WATCHDOG_RESTARTS=0
+MIHOMO_WATCHDOG_NEXT_AT=""
+MONITOR_WATCHDOG_NEXT_AT=""
+MIHOMO_WATCHDOG_GAVE_UP=0
+MONITOR_WATCHDOG_GAVE_UP=0
+MIHOMO_STARTED_AT=0
+MONITOR_STARTED_AT=0
 
 signal_pterodactyl_ready() {
     # ACLClouds uses the Parkervcp/Pelican "golang generic" Egg. Its
@@ -406,10 +605,20 @@ start_mihomo() {
     if ! is_alive "$MIHOMO_PID"; then
         printf '\n--- Mihomo startup log ---\n' >&2
         cat "$MIHOMO_LOG" >&2 || true
-        die "Mihomo failed to start"
+        warn "Mihomo failed to start"
+        wait "$MIHOMO_PID" 2>/dev/null || true
+        MIHOMO_PID=""
+        return 1
     fi
 
+    MIHOMO_STARTED_AT=$SECONDS
     log "Mihomo started (PID $MIHOMO_PID)"
+}
+
+reset_mihomo_watchdog() {
+    MIHOMO_WATCHDOG_RESTARTS=0
+    MIHOMO_WATCHDOG_NEXT_AT=""
+    MIHOMO_WATCHDOG_GAVE_UP=0
 }
 
 restart_mihomo() {
@@ -421,8 +630,9 @@ restart_mihomo() {
     log "Restarting Mihomo..."
     stop_pid "$MIHOMO_PID"
     MIHOMO_PID=""
+    reset_mihomo_watchdog
     generate_mihomo_config
-    start_mihomo
+    start_mihomo || warn "Mihomo manual restart failed; watchdog will retry"
 }
 
 start_monitor() {
@@ -430,22 +640,29 @@ start_monitor() {
 
     printf '\n===== %s start =====\n' "$MONITOR_TYPE" >> "$MONITOR_LOG"
 
-    if [[ "$MONITOR_TYPE" == "lite" ]]; then
-        AGENT_ENDPOINT="$MONITOR_ENDPOINT" \
-        AGENT_TOKEN="$MONITOR_TOKEN" \
-        AGENT_DISABLE_AUTO_UPDATE=true \
-        AGENT_REMOTE_CONTROL_ENABLED="$MONITOR_REMOTE_CONTROL" \
-        "$MONITOR_BIN" >>"$MONITOR_LOG" 2>&1 &
-    else
-        local disable_web_ssh=true
-        [[ "$MONITOR_REMOTE_CONTROL" == "true" ]] && disable_web_ssh=false
+    case "$MONITOR_TYPE" in
+        lite)
+            AGENT_ENDPOINT="$MONITOR_ENDPOINT" \
+            AGENT_TOKEN="$MONITOR_TOKEN" \
+            AGENT_DISABLE_AUTO_UPDATE=true \
+            AGENT_REMOTE_CONTROL_ENABLED="$MONITOR_REMOTE_CONTROL" \
+            "$MONITOR_BIN" >>"$MONITOR_LOG" 2>&1 &
+            ;;
+        komari)
+            local disable_web_ssh=true
+            [[ "$MONITOR_REMOTE_CONTROL" == "true" ]] && disable_web_ssh=false
 
-        AGENT_ENDPOINT="$MONITOR_ENDPOINT" \
-        AGENT_TOKEN="$MONITOR_TOKEN" \
-        AGENT_DISABLE_AUTO_UPDATE=true \
-        AGENT_DISABLE_WEB_SSH="$disable_web_ssh" \
-        "$MONITOR_BIN" >>"$MONITOR_LOG" 2>&1 &
-    fi
+            AGENT_ENDPOINT="$MONITOR_ENDPOINT" \
+            AGENT_TOKEN="$MONITOR_TOKEN" \
+            AGENT_DISABLE_AUTO_UPDATE=true \
+            AGENT_DISABLE_WEB_SSH="$disable_web_ssh" \
+            "$MONITOR_BIN" >>"$MONITOR_LOG" 2>&1 &
+            ;;
+        cfsm)
+            generate_cfsm_config
+            "$MONITOR_BIN" run -config="$CFSM_CONFIG" -debug="$CFSM_DEBUG" >>"$MONITOR_LOG" 2>&1 &
+            ;;
+    esac
     MONITOR_PID=$!
 
     sleep 1
@@ -456,7 +673,14 @@ start_monitor() {
         return 1
     fi
 
+    MONITOR_STARTED_AT=$SECONDS
     log "Monitor started ($MONITOR_TYPE, PID $MONITOR_PID)"
+}
+
+reset_monitor_watchdog() {
+    MONITOR_WATCHDOG_RESTARTS=0
+    MONITOR_WATCHDOG_NEXT_AT=""
+    MONITOR_WATCHDOG_GAVE_UP=0
 }
 
 restart_monitor() {
@@ -468,7 +692,101 @@ restart_monitor() {
     log "Restarting Monitor..."
     stop_pid "$MONITOR_PID"
     MONITOR_PID=""
+    reset_monitor_watchdog
     start_monitor || true
+}
+
+watchdog_delay() {
+    local attempt="$1"
+    local delay="$WATCHDOG_BASE_DELAY_SECONDS"
+    local index
+    for ((index = 1; index < attempt; index += 1)); do
+        delay=$((delay * 2))
+    done
+    printf '%s' "$delay"
+}
+
+supervise_mihomo() {
+    [[ "$MIHOMO_ENABLED" == "1" ]] || return 0
+
+    if is_alive "$MIHOMO_PID"; then
+        if (( MIHOMO_WATCHDOG_RESTARTS > 0 && SECONDS - MIHOMO_STARTED_AT >= WATCHDOG_STABLE_SECONDS )); then
+            log "Mihomo remained stable for ${WATCHDOG_STABLE_SECONDS}s; watchdog counter reset"
+            reset_mihomo_watchdog
+        fi
+        return 0
+    fi
+
+    if [[ -n "$MIHOMO_PID" ]]; then
+        local exit_status=0
+        wait "$MIHOMO_PID" 2>/dev/null || exit_status=$?
+        warn "Mihomo exited unexpectedly (status $exit_status)"
+        MIHOMO_PID=""
+    fi
+    [[ "$MIHOMO_WATCHDOG_GAVE_UP" -eq 0 ]] || return 0
+
+    if [[ -z "$MIHOMO_WATCHDOG_NEXT_AT" ]]; then
+        if (( MIHOMO_WATCHDOG_RESTARTS >= WATCHDOG_MAX_RESTARTS )); then
+            MIHOMO_WATCHDOG_GAVE_UP=1
+            warn "Mihomo watchdog stopped after ${WATCHDOG_MAX_RESTARTS} restart attempts; use Console option 5 to retry manually"
+            return 0
+        fi
+        MIHOMO_WATCHDOG_RESTARTS=$((MIHOMO_WATCHDOG_RESTARTS + 1))
+        local delay
+        delay="$(watchdog_delay "$MIHOMO_WATCHDOG_RESTARTS")"
+        MIHOMO_WATCHDOG_NEXT_AT=$((SECONDS + delay))
+        warn "Mihomo crashed; watchdog restart ${MIHOMO_WATCHDOG_RESTARTS}/${WATCHDOG_MAX_RESTARTS} scheduled in ${delay}s"
+    fi
+
+    if (( SECONDS >= MIHOMO_WATCHDOG_NEXT_AT )); then
+        MIHOMO_WATCHDOG_NEXT_AT=""
+        log "Watchdog restarting Mihomo (${MIHOMO_WATCHDOG_RESTARTS}/${WATCHDOG_MAX_RESTARTS})"
+        start_mihomo || true
+    fi
+}
+
+supervise_monitor() {
+    [[ "$MONITOR_ENABLED" == "1" ]] || return 0
+
+    if is_alive "$MONITOR_PID"; then
+        if (( MONITOR_WATCHDOG_RESTARTS > 0 && SECONDS - MONITOR_STARTED_AT >= WATCHDOG_STABLE_SECONDS )); then
+            log "Monitor remained stable for ${WATCHDOG_STABLE_SECONDS}s; watchdog counter reset"
+            reset_monitor_watchdog
+        fi
+        return 0
+    fi
+
+    if [[ -n "$MONITOR_PID" ]]; then
+        local exit_status=0
+        wait "$MONITOR_PID" 2>/dev/null || exit_status=$?
+        warn "Monitor exited unexpectedly (status $exit_status)"
+        MONITOR_PID=""
+    fi
+    [[ "$MONITOR_WATCHDOG_GAVE_UP" -eq 0 ]] || return 0
+
+    if [[ -z "$MONITOR_WATCHDOG_NEXT_AT" ]]; then
+        if (( MONITOR_WATCHDOG_RESTARTS >= WATCHDOG_MAX_RESTARTS )); then
+            MONITOR_WATCHDOG_GAVE_UP=1
+            warn "Monitor watchdog stopped after ${WATCHDOG_MAX_RESTARTS} restart attempts; use Console option 6 to retry manually"
+            return 0
+        fi
+        MONITOR_WATCHDOG_RESTARTS=$((MONITOR_WATCHDOG_RESTARTS + 1))
+        local delay
+        delay="$(watchdog_delay "$MONITOR_WATCHDOG_RESTARTS")"
+        MONITOR_WATCHDOG_NEXT_AT=$((SECONDS + delay))
+        warn "Monitor crashed; watchdog restart ${MONITOR_WATCHDOG_RESTARTS}/${WATCHDOG_MAX_RESTARTS} scheduled in ${delay}s"
+    fi
+
+    if (( SECONDS >= MONITOR_WATCHDOG_NEXT_AT )); then
+        MONITOR_WATCHDOG_NEXT_AT=""
+        log "Watchdog restarting Monitor (${MONITOR_WATCHDOG_RESTARTS}/${WATCHDOG_MAX_RESTARTS})"
+        start_monitor || true
+    fi
+}
+
+supervise_services() {
+    supervise_mihomo
+    supervise_monitor
 }
 
 cleanup() {
@@ -531,6 +849,8 @@ show_status() {
         printf 'Mihomo : DISABLED\n'
     elif is_alive "$MIHOMO_PID"; then
         printf 'Mihomo : RUNNING (PID %s, %s)\n' "$MIHOMO_PID" "$(pid_rss "$MIHOMO_PID")"
+    elif [[ "$MIHOMO_WATCHDOG_GAVE_UP" -eq 1 ]]; then
+        printf 'Mihomo : STOPPED (watchdog gave up after %s attempts)\n' "$WATCHDOG_MAX_RESTARTS"
     else
         printf 'Mihomo : STOPPED\n'
     fi
@@ -539,6 +859,8 @@ show_status() {
         printf 'Monitor : DISABLED\n'
     elif is_alive "$MONITOR_PID"; then
         printf 'Monitor : RUNNING (%s, PID %s, %s)\n' "$MONITOR_TYPE" "$MONITOR_PID" "$(pid_rss "$MONITOR_PID")"
+    elif [[ "$MONITOR_WATCHDOG_GAVE_UP" -eq 1 ]]; then
+        printf 'Monitor : STOPPED (%s, watchdog gave up after %s attempts)\n' "$MONITOR_TYPE" "$WATCHDOG_MAX_RESTARTS"
     else
         printf 'Monitor : STOPPED (%s)\n' "$MONITOR_TYPE"
     fi
@@ -595,7 +917,9 @@ show_menu() {
 : > "$MIHOMO_LOG"
 : > "$MONITOR_LOG"
 
-start_mihomo
+if ! start_mihomo; then
+    die "Mihomo failed during initial startup"
+fi
 start_monitor || true
 
 log "Startup completed"
@@ -608,8 +932,15 @@ fi
 show_menu
 
 while true; do
-    if ! IFS= read -r choice; then
-        sleep 2
+    supervise_services
+    read_status=0
+    IFS= read -r -t 1 choice || read_status=$?
+    if (( read_status != 0 )); then
+        # Closed stdin returns immediately, unlike a timeout. Avoid a busy loop
+        # while still checking children frequently enough for the watchdog.
+        if (( read_status == 1 )); then
+            sleep 1
+        fi
         continue
     fi
 

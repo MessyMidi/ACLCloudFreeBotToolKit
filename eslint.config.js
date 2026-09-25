@@ -12,7 +12,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'build', '.tools', 'archive-pulse', 'deepseek', 'repo', 'node_modules'] },
+  { ignores: ['dist', 'build', '.tools', 'workspace', 'archive-pulse', 'deepseek', 'repo', 'node_modules'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

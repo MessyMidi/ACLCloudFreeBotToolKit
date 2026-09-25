@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import { CLIENT_FINGERPRINTS } from '../src/constants';
 import { generateEnv, generateStartupCommand, shellQuote, validateProxy, validateRenewal } from '../src/generator';
-import { parseStoredState } from '../src/storage';
+import { parseStoredState, renewalForStorage } from '../src/storage';
 
 const monitor = {
   type: 'lite' as const,
@@ -31,6 +31,30 @@ const renewal = {
   telegramBotToken: '123456789:AA_example-token',
   telegramChatId: '123456789'
 };
+const cfsmMonitor = {
+  type: 'cfsm' as const,
+  endpoint: 'https://worker.example.com/update',
+  token: "secret'value",
+  remoteControl: false as const,
+  agentId: 'server-id',
+  options: {
+    collectInterval: 2,
+    reportInterval: 60,
+    connectionMode: 'auto' as const,
+    pingMode: 'tcp' as const,
+    resetDay: 1,
+    debug: false,
+    ctNode: '',
+    cuNode: '',
+    cmNode: '',
+    bdNode: '',
+    node1: '',
+    node2: '',
+    node3: '',
+    node4: '',
+    networkInterface: 'eth0'
+  }
+};
 
 describe('shellQuote', () => {
   it('safely escapes embedded single quotes', () => {
@@ -50,6 +74,8 @@ describe('generateEnv', () => {
     expect(output).toContain("MONITOR_TYPE='lite'");
     expect(output).toContain("MONITOR_TOKEN='abc'\\''def;$()'");
     expect(output).toContain("MIHOMO_VERSION='v1.19.31'");
+    expect(output).toContain("MIHOMO_SHA256='d4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114'");
+    expect(output).toContain("MIHOMO_FALLBACK_SHA256='04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc'");
     expect(output).not.toContain('SERVER_IP=');
     expect(output).not.toContain('\r');
   });
@@ -81,6 +107,19 @@ describe('generateEnv', () => {
     expect(output).toContain("MIHOMO_ENABLED='0'");
     expect(output).toContain("MONITOR_TOKEN='abc'\\''def;$()'");
     expect(output).not.toContain('REALITY_SNI=');
+  });
+
+  it('generates a supervised, pinned CF Server Monitor config', () => {
+    const output = generateEnv(cfsmMonitor, undefined);
+    expect(output).toContain("MONITOR_ENABLED='1'");
+    expect(output).toContain("MONITOR_TYPE='cfsm'");
+    expect(output).toContain("MONITOR_AGENT_ID='server-id'");
+    expect(output).toContain("MONITOR_VERSION='v1.0.18'");
+    expect(output).toContain("MONITOR_SHA256='757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa'");
+    expect(output).toContain("MONITOR_TOKEN='secret'\\''value'");
+    expect(output).toContain("CFSM_COLLECT_INTERVAL='2'");
+    expect(output).toContain("CFSM_INTERFACE='eth0'");
+    expect(output).not.toContain('CFSM_INSTALL_SCRIPT');
   });
 
   it('generates an automatic-renewal-only config without Monitor or Mihomo', () => {
@@ -117,11 +156,12 @@ describe('parseStoredState', () => {
     }));
     expect(state?.monitorCommand).toContain('secret');
     expect(state?.autoUpdate).toBe(true);
-    expect(state?.version).toBe(2);
+    expect(state?.version).toBe(3);
     expect(state?.renewalEnabled).toBe(false);
+    expect(state?.rememberRenewalSecrets).toBe(false);
   });
 
-  it('restores schema 2 automatic renewal fields locally', () => {
+  it('removes credentials persisted by schema 2 during migration', () => {
     const state = parseStoredState(JSON.stringify({
       version: 2,
       monitorEnabled: true,
@@ -133,13 +173,58 @@ describe('parseStoredState', () => {
       renewalEnabled: true,
       renewal
     }));
-    expect(state?.renewal.password).toBe(renewal.password);
+    expect(state?.renewal.username).toBe('');
+    expect(state?.renewal.password).toBe('');
+    expect(state?.renewal.telegramBotToken).toBe('');
+    expect(state?.renewal.telegramChatId).toBe('');
     expect(state?.renewalEnabled).toBe(true);
+    expect(state?.rememberRenewalSecrets).toBe(false);
+  });
+
+  it('persists renewal credentials only after explicit opt-in', () => {
+    expect(renewalForStorage(renewal, false)).toEqual({
+      ...renewal,
+      username: '',
+      password: '',
+      telegramBotToken: '',
+      telegramChatId: ''
+    });
+    expect(renewalForStorage(renewal, true)).toEqual(renewal);
+
+    const state = parseStoredState(JSON.stringify({
+      version: 3,
+      monitorEnabled: false,
+      monitorType: 'auto',
+      monitorCommand: '',
+      proxyEnabled: false,
+      proxy,
+      autoUpdate: true,
+      renewalEnabled: true,
+      rememberRenewalSecrets: true,
+      renewal
+    }));
+    expect(state?.renewal.password).toBe(renewal.password);
+  });
+
+  it('accepts CF Server Monitor as a locally stored monitor selection', () => {
+    const state = parseStoredState(JSON.stringify({
+      version: 3,
+      monitorEnabled: true,
+      monitorType: 'cfsm',
+      monitorCommand: 'https://github.com/huilang-me/cfsm-agent -id=x -secret=y -url=https://example.com/update',
+      proxyEnabled: false,
+      proxy,
+      autoUpdate: true,
+      renewalEnabled: false,
+      rememberRenewalSecrets: false,
+      renewal
+    }));
+    expect(state?.monitorType).toBe('cfsm');
   });
 
   it('ignores malformed or unknown local snapshots', () => {
     expect(parseStoredState('{broken')).toBeUndefined();
-    expect(parseStoredState(JSON.stringify({ version: 2 }))).toBeUndefined();
+    expect(parseStoredState(JSON.stringify({ version: 3 }))).toBeUndefined();
   });
 });
 

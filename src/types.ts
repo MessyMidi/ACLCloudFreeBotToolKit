@@ -7,15 +7,45 @@
  * see /ADDITIONAL_TERMS.md
  */
 
-export type MonitorType = 'lite' | 'komari';
+export type MonitorType = 'lite' | 'komari' | 'cfsm';
 export type MonitorSelection = 'auto' | MonitorType;
 
-export interface MonitorConfig {
-  type: MonitorType;
+interface MonitorConfigBase {
   endpoint: string;
   token: string;
   remoteControl: boolean;
 }
+
+export interface StandardMonitorConfig extends MonitorConfigBase {
+  type: 'lite' | 'komari';
+}
+
+export interface CfsmOptions {
+  collectInterval: number;
+  reportInterval: number;
+  connectionMode: 'auto' | 'http';
+  pingMode: 'tcp' | 'icmp';
+  resetDay: number;
+  debug: boolean;
+  ctNode: string;
+  cuNode: string;
+  cmNode: string;
+  bdNode: string;
+  node1: string;
+  node2: string;
+  node3: string;
+  node4: string;
+  networkInterface: string;
+}
+
+export interface CfsmMonitorConfig extends MonitorConfigBase {
+  type: 'cfsm';
+  remoteControl: false;
+  agentId: string;
+  options: CfsmOptions;
+}
+
+export type MonitorConfig = StandardMonitorConfig | CfsmMonitorConfig;
 
 export interface ProxyConfig {
   sni: string;

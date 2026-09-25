@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-BOOTSTRAP_VERSION='0.5.0'
+BOOTSTRAP_VERSION='0.6.0-beta.1'
 SUPPORTED_CONFIG_SCHEMA_VERSION=2
 DEFAULT_UPDATE_BASE_URL='https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/latest/download'
 DEFAULT_RELEASES_API_URL='https://api.github.com/repos/MessyMidi/ACLCloudFreeBotToolKit/releases?per_page=20'

@@ -12,8 +12,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f8fa" />
-    <meta name="description" content="在浏览器本地生成 ACLClouds Free Bot 的 Mihomo、Lite 或 Komari 部署配置。" />
+    <meta name="description" content="在浏览器本地生成 ACLClouds Free Bot 的 Mihomo、Lite、Komari 或 CF Server Monitor 部署配置。" />
     <meta name="referrer" content="no-referrer" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <title>ACLClouds · 配置生成器</title>
   </head>
@@ -42,7 +43,7 @@
         <span>ACL<span>Clouds</span><small>FREE BOT TOOLKIT</small></span>
       </a>
       <nav class="top-actions" aria-label="页面操作">
-        <a class="header-link" href="./bootstrap.sh" target="_blank"><svg><use href="#i-github" /></svg><span>Bootstrap</span></a>
+        <a class="header-link" href="https://github.com/MessyMidi/ACLCloudFreeBotToolKit" target="_blank" rel="noopener noreferrer"><svg><use href="#i-github" /></svg><span>GitHub</span></a>
         <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅色"><svg><use href="#i-moon" /></svg></button>
       </nav>
     </header>
@@ -55,13 +56,13 @@
           <p>为 ACLClouds 免费 Bot 生成经过约束的 Mihomo + VLESS REALITY + Monitor 部署配置。</p>
         </div>
         <div class="runtime-note" aria-label="运行架构">
-          <span>GO RUNTIME</span><i></i><span>MIHOMO</span><i></i><span>LITE / KOMARI</span>
+          <span>GO RUNTIME</span><i></i><span>MIHOMO</span><i></i><span>LITE / KOMARI / CFSM</span>
         </div>
       </section>
 
       <section class="privacy-strip">
         <span class="privacy-icon"><svg><use href="#i-shield" /></svg></span>
-        <div><strong>配置只留在当前浏览器</strong><p>Token、密码和表单会保存在此浏览器的 localStorage，便于下次继续使用；不会上传或写入 URL。请勿在公共设备启用自动延期。</p><small id="storage-status">下一次修改后自动保存</small></div>
+        <div><strong>配置只留在当前浏览器</strong><p>普通表单会保存在 localStorage；自动延期的账号、密码和 Telegram 凭证仅在你明确勾选后保存。所有内容都不会上传或写入 URL。</p><small id="storage-status">下一次修改后自动保存；续期密码和 Token 默认不保存</small></div>
         <div class="privacy-actions"><span class="local-badge"><span class="status-dot"></span>LOCAL STORAGE</span><button id="clear-storage" class="clear-storage" type="button">清除本地配置</button></div>
       </section>
 
@@ -81,18 +82,21 @@
                 <label><input type="radio" name="monitorType" value="auto" checked /><span>自动识别</span></label>
                 <label><input type="radio" name="monitorType" value="lite" /><span>Lite</span></label>
                 <label><input type="radio" name="monitorType" value="komari" /><span>Komari</span></label>
+                <label><input type="radio" name="monitorType" value="cfsm" /><span>CFSM</span></label>
               </div>
             </fieldset>
 
             <label class="field-label" for="monitor-command">安装命令</label>
-            <textarea id="monitor-command" rows="5" spellcheck="false" autocomplete="off" placeholder="wget -qO- https://raw.githubusercontent.com/nuomiiiii/Lite-agent/main/install.sh | sudo bash -s -- -e https://lite.example.com -t TOKEN --enable-remote-control"></textarea>
+            <textarea id="monitor-command" rows="5" spellcheck="false" autocomplete="off" placeholder="粘贴 Lite、Komari 或 CF Server Monitor 的一键安装命令"></textarea>
             <div class="field-error" id="monitor-errors" role="alert"></div>
 
             <div class="parse-result" id="parse-result" hidden>
               <div class="parse-title"><span class="success-mark"><svg><use href="#i-check" /></svg></span><strong id="detected-type">已识别 Lite</strong><span>命令解析完成</span></div>
               <dl>
-                <div><dt>Endpoint</dt><dd id="detected-endpoint"></dd></div>
-                <div><dt>Token</dt><dd><code id="detected-token"></code><button class="reveal-button" id="reveal-token" type="button" aria-label="显示 Token"><svg><use href="#i-eye" /></svg></button></dd></div>
+                <div id="row-agent-id" hidden><dt>Server ID</dt><dd id="detected-agent-id"></dd></div>
+                <div><dt id="label-endpoint">Endpoint</dt><dd id="detected-endpoint"></dd></div>
+                <div><dt id="label-token">Token</dt><dd><code id="detected-token"></code><button class="reveal-button" id="reveal-token" type="button" aria-label="显示 Token"><svg><use href="#i-eye" /></svg></button></dd></div>
+                <div id="row-cfsm-options" hidden><dt>运行参数</dt><dd id="detected-cfsm-options"></dd></div>
               </dl>
               <label class="switch-row readonly" id="remote-row"><span><strong id="remote-title">远程控制</strong><small id="remote-detail">严格按照粘贴命令解析</small></span><input id="remote-control" type="checkbox" disabled /><i></i></label>
               <p class="parse-warning" id="parse-warning"></p>
@@ -162,6 +166,10 @@
                 <label><span class="field-label">Telegram Bot Token <em>可选</em></span><input id="telegram-bot-token" type="password" autocomplete="off" placeholder="留空则仅在 Console 查询" /><small class="field-error" data-renew-error-for="telegramBotToken"></small></label>
                 <label><span class="field-label">Telegram Chat ID <em>可选</em></span><input id="telegram-chat-id" inputmode="numeric" autocomplete="off" placeholder="与 Bot Token 一起填写" /><small class="field-error" data-renew-error-for="telegramChatId"></small></label>
               </div>
+              <div class="remember-row">
+                <label><input id="remember-renewal-secrets" type="checkbox" /><span>在此浏览器记住密码和 Token 等</span></label>
+                <span class="help-tooltip" tabindex="0" role="note" aria-label="默认不把自动延期的账号、密码、Telegram Bot Token 和 Chat ID 写入 localStorage，可减少共享设备或页面脚本被攻击时长期凭证暴露的风险。Service ID 不属于这四项，会继续保存在本地。" data-tooltip="默认不把账号、密码、Bot Token 和 Chat ID 写入 localStorage，可减少共享设备或潜在 XSS 导致长期凭证暴露的风险。">?</span>
+              </div>
               <details class="advanced">
                 <summary><span>高级设置</span><small>通常留空</small><svg><use href="#i-chevron" /></svg></summary>
                 <label><span class="field-label">Service ID 覆盖</span><input id="acl-server-id" autocomplete="off" placeholder="留空则使用 P_SERVER_UUID" /><small class="field-hint">仅当运行环境未注入 UUID，或 API 返回值无法匹配时填写真实 identifier / UUID。</small><small class="field-error" data-renew-error-for="serverId"></small></label>
@@ -220,7 +228,7 @@
         </aside>
       </div>
 
-      <footer><span><span class="status-dot"></span>BUILT FOR ACLCLOUDS FREE BOT</span><span>MIHOMO · VLESS REALITY · LITE / KOMARI · AUTO RENEW</span></footer>
+      <footer><span><span class="status-dot"></span>BUILT FOR ACLCLOUDS FREE BOT</span><span>MIHOMO · VLESS REALITY · LITE / KOMARI / CFSM · AUTO RENEW</span></footer>
     </main>
     <div class="toast" id="toast" role="status" hidden></div>
     <script type="module" src="/src/main.ts"></script>

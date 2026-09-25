@@ -8,10 +8,10 @@
  */
 
 import './styles.css';
-import { DEFAULT_PROXY, TESTED_VERSIONS } from './constants';
+import { DEFAULT_PROXY, MONITOR_LABELS, TESTED_VERSIONS } from './constants';
 import { generateEnv, generateStartupCommand, validateProxy, validateRenewal } from './generator';
 import { maskToken, parseMonitorCommand } from './monitor-parser';
-import { FORM_STORAGE_KEY, parseStoredState } from './storage';
+import { FORM_STORAGE_KEY, parseStoredState, renewalForStorage } from './storage';
 import type { StoredFormState } from './storage';
 import type { MonitorConfig, MonitorSelection, ProxyConfig, RenewalConfig } from './types';
 
@@ -27,6 +27,7 @@ const monitorEnabled = byId<HTMLInputElement>('monitor-enabled');
 const proxyEnabled = byId<HTMLInputElement>('proxy-enabled');
 const autoUpdate = byId<HTMLInputElement>('auto-update');
 const renewalEnabled = byId<HTMLInputElement>('renewal-enabled');
+const rememberRenewalSecrets = byId<HTMLInputElement>('remember-renewal-secrets');
 let parsedMonitor: MonitorConfig | undefined;
 let tokenVisible = false;
 let toastTimer = 0;
@@ -48,7 +49,8 @@ function updateTokenPreview(): void {
   if (!parsedMonitor) return;
   byId('detected-token').textContent = tokenVisible ? parsedMonitor.token : maskToken(parsedMonitor.token);
   revealButton.classList.toggle('active', tokenVisible);
-  revealButton.setAttribute('aria-label', tokenVisible ? '隐藏 Token' : '显示 Token');
+  const secretLabel = parsedMonitor.type === 'cfsm' ? 'Secret' : 'Token';
+  revealButton.setAttribute('aria-label', `${tokenVisible ? '隐藏' : '显示'} ${secretLabel}`);
 }
 
 function parseCommand(): void {
@@ -65,15 +67,33 @@ function parseCommand(): void {
   if (!parsedMonitor) return;
 
   tokenVisible = false;
-  byId('detected-type').textContent = `已识别 ${parsedMonitor.type === 'lite' ? 'Lite' : 'Komari'}`;
+  const isCfsm = parsedMonitor.type === 'cfsm';
+  byId('detected-type').textContent = `已识别 ${MONITOR_LABELS[parsedMonitor.type]}`;
+  byId('label-endpoint').textContent = isCfsm ? 'URL' : 'Endpoint';
+  byId('label-token').textContent = isCfsm ? 'Secret' : 'Token';
+  const idRow = byId<HTMLElement>('row-agent-id');
+  const optionsRow = byId<HTMLElement>('row-cfsm-options');
+  idRow.hidden = !isCfsm;
+  optionsRow.hidden = !isCfsm;
+  if (parsedMonitor.type === 'cfsm') {
+    byId('detected-agent-id').textContent = parsedMonitor.agentId;
+    byId('detected-cfsm-options').textContent = [
+      `采样 ${parsedMonitor.options.collectInterval}s`,
+      `上报 ${parsedMonitor.options.reportInterval}s`,
+      parsedMonitor.options.connectionMode.toUpperCase(),
+      `Ping ${parsedMonitor.options.pingMode.toUpperCase()}`
+    ].join(' · ');
+  }
   byId('detected-endpoint').textContent = parsedMonitor.endpoint;
   byId('parse-warning').textContent = result.warnings.join('；');
   remoteControl.checked = parsedMonitor.remoteControl;
-  remoteRow.hidden = false;
-  byId('remote-title').textContent = `远程控制：${parsedMonitor.remoteControl ? '开启' : '关闭'}`;
-  byId('remote-detail').textContent = parsedMonitor.type === 'lite'
-    ? (parsedMonitor.remoteControl ? '命令包含 --enable-remote-control' : '命令未开启，或显式设置为 false')
-    : (parsedMonitor.remoteControl ? '命令未包含 --disable-web-ssh' : '命令包含 --disable-web-ssh');
+  remoteRow.hidden = isCfsm;
+  if (!isCfsm) {
+    byId('remote-title').textContent = `远程控制：${parsedMonitor.remoteControl ? '开启' : '关闭'}`;
+    byId('remote-detail').textContent = parsedMonitor.type === 'lite'
+      ? (parsedMonitor.remoteControl ? '命令包含 --enable-remote-control' : '命令未开启，或显式设置为 false')
+      : (parsedMonitor.remoteControl ? '命令未包含 --disable-web-ssh' : '命令包含 --disable-web-ssh');
+  }
   updateTokenPreview();
 }
 
@@ -159,7 +179,7 @@ function generate(): void {
   byId('empty-output').hidden = true;
   byId('generated-output').hidden = false;
   const enabledServices = [
-    monitor ? (monitor.type === 'lite' ? 'Lite' : 'Komari') : '',
+    monitor ? MONITOR_LABELS[monitor.type] : '',
     proxy ? 'VLESS + REALITY' : '',
     renewal ? '自动延期' : ''
   ].filter(Boolean).join(' + ');
@@ -204,7 +224,8 @@ function renderVersions(): void {
   const entries = [
     ['Mihomo', TESTED_VERSIONS.mihomo.version],
     ['Lite Agent', TESTED_VERSIONS.lite.version],
-    ['Komari Agent', TESTED_VERSIONS.komari.version]
+    ['Komari Agent', TESTED_VERSIONS.komari.version],
+    ['CF Server Monitor', TESTED_VERSIONS.cfsm.version]
   ];
   byId('version-list').replaceChildren(...entries.map(([name, version]) => {
     const row = document.createElement('div');
@@ -247,8 +268,9 @@ function saveTheme(dark: boolean): void {
 }
 
 function currentStoredState(): StoredFormState {
+  const renewal = renewalConfig();
   return {
-    version: 2,
+    version: 3,
     monitorEnabled: monitorEnabled.checked,
     monitorType: selectedMonitorType(),
     monitorCommand: commandInput.value,
@@ -256,14 +278,17 @@ function currentStoredState(): StoredFormState {
     proxy: proxyConfig(),
     autoUpdate: autoUpdate.checked,
     renewalEnabled: renewalEnabled.checked,
-    renewal: renewalConfig()
+    rememberRenewalSecrets: rememberRenewalSecrets.checked,
+    renewal: renewalForStorage(renewal, rememberRenewalSecrets.checked)
   };
 }
 
 function saveFormState(): void {
   try {
     localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(currentStoredState()));
-    byId('storage-status').textContent = '已自动保存在此浏览器';
+    byId('storage-status').textContent = rememberRenewalSecrets.checked
+      ? '配置与续期凭证已保存在此浏览器'
+      : '配置已保存；续期密码和 Token 未保存';
   } catch {
     byId('storage-status').textContent = '浏览器拒绝了本地保存';
   }
@@ -279,6 +304,7 @@ function applyStoredState(state: StoredFormState): void {
   proxyEnabled.checked = state.proxyEnabled;
   autoUpdate.checked = state.autoUpdate;
   renewalEnabled.checked = state.renewalEnabled;
+  rememberRenewalSecrets.checked = state.rememberRenewalSecrets;
   commandInput.value = state.monitorCommand;
   const monitorType = form.querySelector<HTMLInputElement>(`input[name="monitorType"][value="${state.monitorType}"]`);
   if (monitorType) monitorType.checked = true;
@@ -322,6 +348,7 @@ form.querySelectorAll<HTMLInputElement>('input[name="monitorType"]').forEach((in
 monitorEnabled.addEventListener('change', () => syncModuleState('monitor-section', 'monitor-fields', monitorEnabled));
 proxyEnabled.addEventListener('change', () => syncModuleState('proxy-section', 'proxy-fields', proxyEnabled));
 renewalEnabled.addEventListener('change', () => syncModuleState('renewal-section', 'renewal-fields', renewalEnabled));
+rememberRenewalSecrets.addEventListener('change', saveFormState);
 revealButton.addEventListener('click', () => { tokenVisible = !tokenVisible; updateTokenPreview(); });
 form.addEventListener('submit', (event) => { event.preventDefault(); generate(); });
 document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => button.addEventListener('click', () => void copyText(button.dataset.copy as 'env' | 'startup', button)));
@@ -337,7 +364,10 @@ let storedState: StoredFormState | undefined;
 try { storedState = parseStoredState(localStorage.getItem(FORM_STORAGE_KEY)); } catch { storedState = undefined; }
 if (storedState) {
   applyStoredState(storedState);
-  byId('storage-status').textContent = '已恢复此浏览器保存的配置';
+  saveFormState();
+  byId('storage-status').textContent = storedState.rememberRenewalSecrets
+    ? '已恢复配置与续期凭证'
+    : '已恢复配置；续期密码和 Token 未保存';
 } else {
   Object.entries(DEFAULT_PROXY).forEach(([key, value]) => {
     const element = document.getElementById(key) as HTMLInputElement | HTMLSelectElement | null;

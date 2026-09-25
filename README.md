@@ -4,16 +4,17 @@
 
 # ACLCloudFreeBotToolKit
 
-A configuration generator and runtime toolkit for ACLClouds Free Bot. It generates a `config.env` file and Startup Command in the browser, then runs Mihomo, Lite/Komari, and optional renewal checks in a non-root container.
+A configuration generator and runtime toolkit for ACLClouds Free Bot. It generates a `config.env` file and Startup Command in the browser, then runs Mihomo, Lite, Komari, CF Server Monitor, and optional renewal checks in a non-root container.
 
 [Releases](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases) · [Issues](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/issues)
 
 ## Features
 
 - Runs Mihomo with VLESS REALITY and persists connection details after the first start.
-- Connects a Lite or Komari monitoring agent.
+- Connects a Lite, Komari, or CF Server Monitor agent.
 - Optionally renews the current ACLClouds service, with CAPTCHA handling and Telegram notifications.
 - Downloads, verifies, and updates runtime files while keeping the local version available if an update fails.
+- Restarts crashed Mihomo and Monitor processes with exponential backoff, then reports and stops after five consecutive retries.
 - Lets Mihomo, monitoring, and renewal run independently.
 
 Current release assets target Linux AMD64.
@@ -37,7 +38,7 @@ ACLClouds injects `SERVER_IP` and `SERVER_PORT`; do not add them to the configur
 
 ## Configuration and data
 
-The generator has no backend. Form data is stored in the current site's browser `localStorage`, is not written to the URL, and can be cleared from the page.
+The generator has no backend. Ordinary form data is stored in the current site's browser `localStorage`, is not written to the URL, and can be cleared from the page. Renewal username, password, Telegram Bot Token, and Chat ID are not persisted unless the user explicitly enables the “remember” option.
 
 When automatic renewal is enabled, account credentials are written to `config.env`. Keep this file private and do not save the configuration on a shared device. Runtime authentication data and logs are stored in the container's `data/` and `logs/` directories.
 

@@ -98,6 +98,26 @@ export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig, renewa
       `MONITOR_URL=${shellQuote(monitorVersion.url)}`,
       `MONITOR_SHA256=${shellQuote(monitorVersion.sha256)}`
     );
+    if (monitor.type === 'cfsm') {
+      lines.push(
+        `MONITOR_AGENT_ID=${shellQuote(monitor.agentId)}`,
+        `CFSM_COLLECT_INTERVAL=${shellQuote(String(monitor.options.collectInterval))}`,
+        `CFSM_REPORT_INTERVAL=${shellQuote(String(monitor.options.reportInterval))}`,
+        `CFSM_CONNECTION_MODE=${shellQuote(monitor.options.connectionMode)}`,
+        `CFSM_PING_MODE=${shellQuote(monitor.options.pingMode)}`,
+        `CFSM_RESET_DAY=${shellQuote(String(monitor.options.resetDay))}`,
+        `CFSM_DEBUG=${shellQuote(monitor.options.debug ? '1' : '0')}`,
+        `CFSM_CT_NODE=${shellQuote(monitor.options.ctNode)}`,
+        `CFSM_CU_NODE=${shellQuote(monitor.options.cuNode)}`,
+        `CFSM_CM_NODE=${shellQuote(monitor.options.cmNode)}`,
+        `CFSM_BD_NODE=${shellQuote(monitor.options.bdNode)}`,
+        `CFSM_NODE_1=${shellQuote(monitor.options.node1)}`,
+        `CFSM_NODE_2=${shellQuote(monitor.options.node2)}`,
+        `CFSM_NODE_3=${shellQuote(monitor.options.node3)}`,
+        `CFSM_NODE_4=${shellQuote(monitor.options.node4)}`,
+        `CFSM_INTERFACE=${shellQuote(monitor.options.networkInterface)}`
+      );
+    }
   }
 
   lines.push(
@@ -110,7 +130,9 @@ export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig, renewa
     lines.push(
       `MIHOMO_VERSION=${shellQuote(TESTED_VERSIONS.mihomo.version)}`,
       `MIHOMO_URL=${shellQuote(TESTED_VERSIONS.mihomo.url)}`,
+      `MIHOMO_SHA256=${shellQuote(TESTED_VERSIONS.mihomo.sha256)}`,
       `MIHOMO_FALLBACK_URL=${shellQuote(TESTED_VERSIONS.mihomo.fallbackUrl)}`,
+      `MIHOMO_FALLBACK_SHA256=${shellQuote(TESTED_VERSIONS.mihomo.fallbackSha256)}`,
       `MIHOMO_LOGLEVEL=${shellQuote('info')}`,
       `MIHOMO_REMARK=${shellQuote(proxy.remark)}`,
       '',
