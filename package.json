@@ -1,6 +1,6 @@
 {
   "name": "aclclouds-config-generator",
-  "version": "1.0.0",
+  "version": "0.6.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -8,9 +8,10 @@
     "dev": "vite",
     "build": "tsc -b && node scripts/build-renew.mjs && vite build && node scripts/copy-launcher.mjs",
     "preview": "vite preview",
-    "lint": "eslint .",
+    "lint": "eslint src tests scripts vite.config.ts eslint.config.js",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run && node scripts/test-renew.mjs"
+    "test": "vitest run && node scripts/test-renew.mjs",
+    "version": "node scripts/sync-version.mjs && git add bootstrap.sh launcher.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

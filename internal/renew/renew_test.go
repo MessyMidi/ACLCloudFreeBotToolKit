@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestCheckRenewsMatchingCurrentServiceAndNotifies(t *testing.T) {
@@ -384,6 +385,222 @@ func TestDecodeCaptchaImageRejectsUnexpectedDimensions(t *testing.T) {
 	if _, _, _, err := decodeCaptchaImage(data.Bytes()); !errorsIs(err, errImageDecode) {
 		t.Fatalf("decodeCaptchaImage error = %v, want errImageDecode", err)
 	}
+}
+
+func TestFailureIsReportedAfterTheCheckRanOutOfTime(t *testing.T) {
+	notification := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/bot") {
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			notification = r.Form.Get("text")
+			writeJSON(t, w, http.StatusOK, map[string]any{"ok": true})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if _, err := Check(ctx, testConfig(t, server.URL)); err == nil {
+		t.Fatal("Check succeeded with an expired context")
+	}
+	if !strings.Contains(notification, "自动延期需要处理") {
+		t.Fatalf("timeout failure was not reported: %q", notification)
+	}
+}
+
+func TestInterruptedCheckIsNotReported(t *testing.T) {
+	notified := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/bot") {
+			notified = true
+		}
+		writeJSON(t, w, http.StatusOK, map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Check(ctx, testConfig(t, server.URL)); err == nil {
+		t.Fatal("Check succeeded with a canceled context")
+	}
+	if notified {
+		t.Fatal("a check interrupted by shutdown must not send a notification")
+	}
+}
+
+func TestRenewalLogsInAgainWhenTheSessionExpiresMidway(t *testing.T) {
+	loggedIn := false
+	renewCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/client":
+			writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{
+				map[string]any{"object": "server", "attributes": map[string]any{
+					"identifier": "real-id", "uuid": "full-uuid", "can_renew": true,
+				}},
+			}})
+		case r.URL.Path == "/auth/login" && r.Method == http.MethodGet:
+			http.SetCookie(w, &http.Cookie{Name: "XSRF-TOKEN", Value: "xsrf-fresh", Path: "/"})
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<html></html>`))
+		case r.URL.Path == "/auth/login" && r.Method == http.MethodPost:
+			loggedIn = true
+			writeJSON(t, w, http.StatusOK, map[string]any{"ok": true})
+		case r.URL.Path == "/api/client/servers/real-id/upgrade/renew":
+			renewCalls++
+			if !loggedIn {
+				// Laravel answers an expired CSRF token with 419 Page Expired.
+				writeJSON(t, w, 419, map[string]any{"message": "CSRF token mismatch."})
+				return
+			}
+			writeJSON(t, w, http.StatusOK, map[string]any{"expires_at": "2026-10-01T00:00:00Z"})
+		case strings.HasPrefix(r.URL.Path, "/bot"):
+			writeJSON(t, w, http.StatusOK, map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	result, err := Check(context.Background(), testConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("Check returned error: %v", err)
+	}
+	if !loggedIn || renewCalls != 2 || !result.Renewed {
+		t.Fatalf("expected a login and a successful retry: loggedIn=%v renewCalls=%d result=%+v", loggedIn, renewCalls, result)
+	}
+}
+
+func TestCaptchaRequiredLooksAtErrorFieldsOnly(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		want   bool
+	}{
+		{http.StatusForbidden, `{"error":"captcha_required"}`, true},
+		{http.StatusUnprocessableEntity, `{"message":"The given data was invalid.","errors":{"captcha":["required"]}}`, true},
+		{http.StatusUnprocessableEntity, `{"captcha_required":true}`, true},
+		{http.StatusForbidden, `<html>Please solve the CAPTCHA</html>`, true},
+		{http.StatusUnprocessableEntity, `{"message":"These credentials do not match our records.","captcha_site_key":"key"}`, false},
+		{http.StatusUnprocessableEntity, `{"message":"Invalid password","captcha_enabled":false}`, false},
+		{http.StatusBadRequest, `{"error":"captcha_required"}`, false},
+	}
+	for _, tc := range cases {
+		if got := captchaRequired(httpResult{Status: tc.status, Body: []byte(tc.body)}); got != tc.want {
+			t.Errorf("captchaRequired(%d, %s) = %v, want %v", tc.status, tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestCaptchaSolverPrefersTheOptionClosestToTheTarget(t *testing.T) {
+	target := captchaTestPNG(t, [4]int{17, 9, 37, 29})
+	// The same word with some noise: still recognised as the target, but a
+	// weaker match. It comes first, so picking the first match would fail.
+	noisyTarget := captchaTestPNG(t, [4]int{17, 9, 37, 29}, [4]int{150, 36, 156, 42})
+	other := captchaTestPNG(t, [4]int{150, 10, 180, 30})
+	useCaptchaReferences(t, map[string][]byte{"Cloud": target, "Panel": other})
+
+	answer := solveTestCaptcha(t, "Cloud", map[string][]byte{"noisy": noisyTarget, "exact": target, "other": other}, []string{"noisy", "exact", "other"})
+	if answer != "exact" {
+		t.Fatalf("submitted option %q, want the closest match", answer)
+	}
+}
+
+func TestCaptchaSolverSubmitsTheClosestOptionWhenNoneIsRecognised(t *testing.T) {
+	target := captchaTestPNG(t, [4]int{17, 9, 37, 29})
+	other := captchaTestPNG(t, [4]int{150, 10, 180, 30})
+	distorted := captchaTestPNG(t, [4]int{17, 9, 37, 29}, [4]int{60, 5, 80, 15}, [4]int{100, 25, 120, 35})
+	useCaptchaReferences(t, map[string][]byte{"Cloud": target, "Panel": other, "Discord": distorted})
+
+	// Neither option is recognised as Cloud; the one closest to it is sent.
+	answer := solveTestCaptcha(t, "Cloud", map[string][]byte{"far": other, "near": distorted}, []string{"far", "near"})
+	if answer != "near" {
+		t.Fatalf("submitted option %q, want the option closest to the target", answer)
+	}
+}
+
+// captchaTestPNG draws black rectangles {x0, y0, x1, y1} on a white CAPTCHA-sized image.
+func captchaTestPNG(t *testing.T, rectangles ...[4]int) []byte {
+	t.Helper()
+	img := image.NewGray(image.Rect(0, 0, captchaCols, captchaRows))
+	for y := 0; y < captchaRows; y++ {
+		for x := 0; x < captchaCols; x++ {
+			img.SetGray(x, y, color.Gray{Y: 255})
+		}
+	}
+	for _, r := range rectangles {
+		for y := r[1]; y < r[3]; y++ {
+			for x := r[0]; x < r[2]; x++ {
+				img.SetGray(x, y, color.Gray{Y: 0})
+			}
+		}
+	}
+	var data bytes.Buffer
+	if err := png.Encode(&data, img); err != nil {
+		t.Fatal(err)
+	}
+	return data.Bytes()
+}
+
+func useCaptchaReferences(t *testing.T, words map[string][]byte) {
+	t.Helper()
+	references := make([]precomputedWord, 0, len(words))
+	for word, data := range words {
+		cols, rows, err := CaptchaProfiles(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		references = append(references, precomputedWord{word: word, colProfile: cols, rowProfile: rows})
+	}
+	original := precomputedRef
+	precomputedRef = references
+	t.Cleanup(func() { precomputedRef = original })
+}
+
+// solveTestCaptcha runs solveCaptcha against a fake challenge and returns
+// the option token it submitted.
+func solveTestCaptcha(t *testing.T, target string, images map[string][]byte, options []string) string {
+	t.Helper()
+	submitted := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/auth/captcha/challenge":
+			writeJSON(t, w, http.StatusOK, map[string]any{"id": "id", "ts": 1, "sig": "sig", "context": "generic"})
+		case r.URL.Path == "/auth/captcha/image":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(images[r.URL.Query().Get("t")])
+		case r.URL.Path == "/auth/captcha":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if answer, ok := body["answer"].(string); ok {
+				submitted = answer
+				writeJSON(t, w, http.StatusOK, map[string]any{"passed": true, "token": "verified"})
+				return
+			}
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"interactive": true, "options": options, "answer_sig": "answer-sig", "target": target,
+				"id": "id", "ts": 1, "sig": "sig", "context": "generic",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s, err := newSession(testConfig(t, server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := solveCaptcha(context.Background(), s, "renewal_gate"); err != nil {
+		t.Fatalf("solveCaptcha returned error: %v", err)
+	}
+	return submitted
 }
 
 func TestSelectServerNeverGuessesUUIDPrefix(t *testing.T) {

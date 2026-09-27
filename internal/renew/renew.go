@@ -26,6 +26,15 @@ type Result struct {
 	Message string
 }
 
+// notificationTimeout gives each Telegram delivery its own deadline, so a
+// check that ran out of time can still report that it needs attention.
+const notificationTimeout = 15 * time.Second
+
+// errSessionExpired marks a renewal request rejected because the login or the
+// CSRF token expired. Both are rejected before the renewal runs, so logging in
+// again and retrying cannot renew twice.
+var errSessionExpired = errors.New("ACLClouds session expired during renewal")
+
 type server struct {
 	Identifier            string
 	UUID                  string
@@ -80,12 +89,22 @@ func Check(ctx context.Context, config Config) (Result, error) {
 	}
 
 	result, err := s.renew(ctx, target)
+	if errors.Is(err, errSessionExpired) {
+		log.Print("[renew] Session expired during renewal; logging in again")
+		if err := s.login(ctx, config.Username, config.Password); err != nil {
+			return fail(ctx, config, err)
+		}
+		if err := s.saveAuthState(config.AuthStatePath); err != nil {
+			log.Printf("[renew] WARNING: %v", err)
+		}
+		result, err = s.renew(ctx, target)
+	}
 	if err != nil {
 		return fail(ctx, config, err)
 	}
 	if result.Renewed {
 		message := fmt.Sprintf("ACLClouds 自动延期成功\n服务：%s\n%s", target.displayName(), result.Message)
-		if notifyErr := notifyTelegram(ctx, config, message); notifyErr != nil {
+		if notifyErr := notify(ctx, config, message); notifyErr != nil {
 			log.Printf("[renew] WARNING: success notification failed: %v", notifyErr)
 		}
 	}
@@ -93,11 +112,22 @@ func Check(ctx context.Context, config Config) (Result, error) {
 }
 
 func fail(ctx context.Context, config Config, err error) (Result, error) {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		// Interrupted by a signal because the container is stopping; there is
+		// nothing for the user to act on.
+		return Result{}, err
+	}
 	message := fmt.Sprintf("ACLClouds 自动延期需要处理\n%s", err.Error())
-	if notifyErr := notifyTelegram(ctx, config, message); notifyErr != nil {
+	if notifyErr := notify(ctx, config, message); notifyErr != nil {
 		log.Printf("[renew] WARNING: failure notification failed: %v", notifyErr)
 	}
 	return Result{}, err
+}
+
+func notify(ctx context.Context, config Config, message string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notificationTimeout)
+	defer cancel()
+	return notifyTelegram(ctx, config, message)
 }
 
 func (s *session) listServers(ctx context.Context) ([]server, bool, error) {
@@ -105,7 +135,7 @@ func (s *session) listServers(ctx context.Context) ([]server, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("GET /api/client: %w", err)
 	}
-	if result.Status == http.StatusUnauthorized {
+	if sessionExpired(result.Status) {
 		return nil, true, nil
 	}
 	if result.Status != http.StatusOK {
@@ -157,8 +187,8 @@ func (s *session) renew(ctx context.Context, target server) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("renew %s: %w", target.displayName(), err)
 	}
-	if result.Status == http.StatusUnauthorized {
-		return Result{}, errors.New("ACLClouds session expired during renewal; it will be refreshed on the next check")
+	if sessionExpired(result.Status) {
+		return Result{}, errSessionExpired
 	}
 	if result.Status == http.StatusOK {
 		return s.confirmRenewal(ctx, target, result.Body)
@@ -177,6 +207,9 @@ func (s *session) renew(ctx context.Context, target server) (Result, error) {
 		result, err = s.request(ctx, http.MethodPost, path, map[string]any{"captcha_token": token})
 		if err != nil {
 			return Result{}, fmt.Errorf("retry renewal after CAPTCHA: %w", err)
+		}
+		if sessionExpired(result.Status) {
+			return Result{}, errSessionExpired
 		}
 		if result.Status == http.StatusOK {
 			return s.confirmRenewal(ctx, target, result.Body)

@@ -19,7 +19,8 @@ import (
 	"github.com/MessyMidi/ACLCloudFreeBotToolKit/internal/renew"
 )
 
-const version = "0.6.0-beta.1"
+// version is set at build time from package.json (see scripts/build-renew.mjs).
+var version = "dev"
 
 func main() {
 	log.SetFlags(0)

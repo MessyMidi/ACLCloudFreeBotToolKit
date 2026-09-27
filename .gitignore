@@ -4,6 +4,7 @@ build/
 release/
 .tools/
 .vite/
+.claude/
 .codex-remote/
 *.log
 *.tsbuildinfo

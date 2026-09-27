@@ -38,13 +38,14 @@
     </svg>
 
     <header class="topbar">
-      <a class="brand" href="#top" aria-label="ACLClouds 配置生成器首页">
+      <a class="brand" href="#top" aria-label="ACLClouds 配置生成器首页" data-i18n-aria-label="nav.home">
         <span class="brand-mark"><svg><use href="#i-bolt" /></svg></span>
         <span>ACL<span>Clouds</span><small>FREE BOT TOOLKIT</small></span>
       </a>
-      <nav class="top-actions" aria-label="页面操作">
+      <nav class="top-actions" aria-label="页面操作" data-i18n-aria-label="nav.actions">
         <a class="header-link" href="https://github.com/MessyMidi/ACLCloudFreeBotToolKit" target="_blank" rel="noopener noreferrer"><svg><use href="#i-github" /></svg><span>GitHub</span></a>
-        <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅色"><svg><use href="#i-moon" /></svg></button>
+        <button class="icon-button locale-toggle" id="locale-toggle" type="button" aria-label="Switch to English" data-i18n-aria-label="nav.languageLabel"><span data-i18n="nav.language">EN</span></button>
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="切换深浅色" data-i18n-aria-label="nav.theme"><svg><use href="#i-moon" /></svg></button>
       </nav>
     </header>
 
@@ -52,18 +53,22 @@
       <section class="hero">
         <div>
           <div class="eyebrow">DEPLOY ONCE · KEEP IT SIMPLE</div>
-          <h1>把复杂配置，变成一次粘贴<span>.</span></h1>
-          <p>为 ACLClouds 免费 Bot 生成经过约束的 Mihomo + VLESS REALITY + Monitor 部署配置。</p>
+          <h1><span data-i18n="hero.title">把复杂配置，变成一次粘贴</span><span class="accent">.</span></h1>
+          <p data-i18n="hero.body">为 ACLClouds 免费 Bot 生成经过约束的 Mihomo + VLESS REALITY + Monitor 部署配置。</p>
         </div>
-        <div class="runtime-note" aria-label="运行架构">
+        <div class="runtime-note" aria-label="运行架构" data-i18n-aria-label="hero.runtime">
           <span>GO RUNTIME</span><i></i><span>MIHOMO</span><i></i><span>LITE / KOMARI / CFSM</span>
         </div>
       </section>
 
       <section class="privacy-strip">
         <span class="privacy-icon"><svg><use href="#i-shield" /></svg></span>
-        <div><strong>配置只留在当前浏览器</strong><p>普通表单会保存在 localStorage；自动延期的账号、密码和 Telegram 凭证仅在你明确勾选后保存。所有内容都不会上传或写入 URL。</p><small id="storage-status">下一次修改后自动保存；续期密码和 Token 默认不保存</small></div>
-        <div class="privacy-actions"><span class="local-badge"><span class="status-dot"></span>LOCAL STORAGE</span><button id="clear-storage" class="clear-storage" type="button">清除本地配置</button></div>
+        <div>
+          <strong data-i18n="privacy.title">配置只留在当前浏览器</strong>
+          <p data-i18n="privacy.body">表单内容（含 Monitor 安装命令）保存在当前浏览器的 localStorage，不会上传，也不会写入 URL。自动延期的账号、密码和 Telegram 凭证属于密钥，只有勾选自动延期模块中的选项后才会保存。</p>
+          <small id="storage-status">下一次修改后自动保存；续期密码和 Token 默认不保存</small>
+        </div>
+        <div class="privacy-actions"><span class="local-badge"><span class="status-dot"></span>LOCAL STORAGE</span><button id="clear-storage" class="clear-storage" type="button" data-i18n="privacy.clear">清除本地配置</button></div>
       </section>
 
       <div class="workspace">
@@ -71,34 +76,34 @@
           <section class="panel section-card module-card" id="monitor-section">
             <div class="section-heading">
               <span class="section-index">01</span>
-              <div><h2>Monitor</h2><p>粘贴面板生成的完整一键安装命令</p></div>
-              <label class="module-toggle"><input id="monitor-enabled" data-module-toggle type="checkbox" checked /><i></i><span>启用</span></label>
+              <div><h2>Monitor</h2><p data-i18n="monitor.subtitle">粘贴面板生成的完整一键安装命令</p></div>
+              <label class="module-toggle"><input id="monitor-enabled" data-module-toggle type="checkbox" checked /><i></i><span data-i18n="common.enable">启用</span></label>
             </div>
 
             <fieldset class="module-body" id="monitor-fields">
             <fieldset class="choice-field">
-              <legend>识别方式</legend>
+              <legend data-i18n="monitor.detection">识别方式</legend>
               <div class="segmented" id="monitor-selection">
-                <label><input type="radio" name="monitorType" value="auto" checked /><span>自动识别</span></label>
+                <label><input type="radio" name="monitorType" value="auto" checked /><span data-i18n="monitor.auto">自动识别</span></label>
                 <label><input type="radio" name="monitorType" value="lite" /><span>Lite</span></label>
                 <label><input type="radio" name="monitorType" value="komari" /><span>Komari</span></label>
                 <label><input type="radio" name="monitorType" value="cfsm" /><span>CFSM</span></label>
               </div>
             </fieldset>
 
-            <label class="field-label" for="monitor-command">安装命令</label>
-            <textarea id="monitor-command" rows="5" spellcheck="false" autocomplete="off" placeholder="粘贴 Lite、Komari 或 CF Server Monitor 的一键安装命令"></textarea>
+            <label class="field-label" for="monitor-command" data-i18n="monitor.command">安装命令</label>
+            <textarea id="monitor-command" rows="5" spellcheck="false" autocomplete="off" placeholder="粘贴 Lite、Komari 或 CF Server Monitor 的一键安装命令" data-i18n-placeholder="monitor.placeholder"></textarea>
             <div class="field-error" id="monitor-errors" role="alert"></div>
 
             <div class="parse-result" id="parse-result" hidden>
-              <div class="parse-title"><span class="success-mark"><svg><use href="#i-check" /></svg></span><strong id="detected-type">已识别 Lite</strong><span>命令解析完成</span></div>
+              <div class="parse-title"><span class="success-mark"><svg><use href="#i-check" /></svg></span><strong id="detected-type">已识别 Lite</strong><span data-i18n="monitor.parsed">命令解析完成</span></div>
               <dl>
                 <div id="row-agent-id" hidden><dt>Server ID</dt><dd id="detected-agent-id"></dd></div>
                 <div><dt id="label-endpoint">Endpoint</dt><dd id="detected-endpoint"></dd></div>
                 <div><dt id="label-token">Token</dt><dd><code id="detected-token"></code><button class="reveal-button" id="reveal-token" type="button" aria-label="显示 Token"><svg><use href="#i-eye" /></svg></button></dd></div>
-                <div id="row-cfsm-options" hidden><dt>运行参数</dt><dd id="detected-cfsm-options"></dd></div>
+                <div id="row-cfsm-options" hidden><dt data-i18n="monitor.runtimeOptions">运行参数</dt><dd id="detected-cfsm-options"></dd></div>
               </dl>
-              <label class="switch-row readonly" id="remote-row"><span><strong id="remote-title">远程控制</strong><small id="remote-detail">严格按照粘贴命令解析</small></span><input id="remote-control" type="checkbox" disabled /><i></i></label>
+              <label class="switch-row readonly" id="remote-row"><span><strong id="remote-title"></strong><small id="remote-detail"></small></span><input id="remote-control" type="checkbox" disabled /><i></i></label>
               <p class="parse-warning" id="parse-warning"></p>
             </div>
             </fieldset>
@@ -107,17 +112,17 @@
           <section class="panel section-card module-card" id="proxy-section">
             <div class="section-heading">
               <span class="section-index">02</span>
-              <div><h2>VLESS + REALITY</h2><p>Mihomo 监听端口由 ACLClouds 自动注入</p></div>
-              <label class="module-toggle"><input id="proxy-enabled" data-module-toggle type="checkbox" checked /><i></i><span>启用</span></label>
+              <div><h2>VLESS + REALITY</h2><p data-i18n="proxy.subtitle">Mihomo 监听端口由 ACLClouds 自动注入</p></div>
+              <label class="module-toggle"><input id="proxy-enabled" data-module-toggle type="checkbox" checked /><i></i><span data-i18n="common.enable">启用</span></label>
             </div>
 
             <fieldset class="module-body" id="proxy-fields">
             <div class="field-grid">
-              <label><span class="field-label">节点备注</span><input id="remark" name="remark" value="ACLClouds-Free" autocomplete="off" /><small class="field-error" data-error-for="remark"></small></label>
+              <label><span class="field-label" data-i18n="proxy.remark">节点备注</span><input id="remark" name="remark" value="ACLClouds-Free" autocomplete="off" /><small class="field-error" data-error-for="remark"></small></label>
               <label>
                 <span class="field-label">Client Fingerprint</span>
                 <select id="fingerprint" name="fingerprint" aria-describedby="fingerprint-hint">
-                  <option value="chrome">Chrome · 默认</option>
+                  <option value="chrome" data-i18n="proxy.fingerprintDefault">Chrome · 默认</option>
                   <option value="firefox">Firefox</option>
                   <option value="safari">Safari</option>
                   <option value="ios">iOS</option>
@@ -125,24 +130,24 @@
                   <option value="edge">Edge</option>
                   <option value="360">360 Browser</option>
                   <option value="qq">QQ Browser</option>
-                  <option value="random">Random · 随机现代浏览器</option>
+                  <option value="random" data-i18n="proxy.fingerprintRandom">Random · 随机现代浏览器</option>
                 </select>
-                <small class="field-hint" id="fingerprint-hint">使用 Mihomo 与常见 VLESS 客户端均支持的 uTLS 指纹；不确定时保持 Chrome。</small>
+                <small class="field-hint" id="fingerprint-hint" data-i18n="proxy.fingerprintHint">使用 Mihomo 与常见 VLESS 客户端均支持的 uTLS 指纹；不确定时保持 Chrome。</small>
                 <small class="field-error" data-error-for="fingerprint"></small>
               </label>
             </div>
 
             <details class="advanced" open>
-              <summary><span>REALITY 设置</span><small>使用已验证默认值</small><svg><use href="#i-chevron" /></svg></summary>
+              <summary><span data-i18n="proxy.reality">REALITY 设置</span><small data-i18n="proxy.realityHint">使用已验证默认值</small><svg><use href="#i-chevron" /></svg></summary>
               <div class="field-grid advanced-fields">
                 <label><span class="field-label">SNI</span><input id="sni" name="sni" value="www.cloudflare.com" autocomplete="off" /><small class="field-error" data-error-for="sni"></small></label>
                 <label><span class="field-label">Destination</span><input id="destination" name="destination" value="www.cloudflare.com:443" autocomplete="off" /><small class="field-error" data-error-for="destination"></small></label>
               </div>
-              <p class="field-hint">UUID、REALITY 密钥和 Short ID 将由 launcher 首次启动生成并持久化，重启不会变化。</p>
+              <p class="field-hint" data-i18n="proxy.secretsHint">UUID、REALITY 密钥和 Short ID 将由 launcher 首次启动生成并持久化，重启不会变化。</p>
             </details>
 
             <details class="advanced version-details">
-              <summary><span>已固定版本</span><small>重启不会追踪 latest</small><svg><use href="#i-chevron" /></svg></summary>
+              <summary><span data-i18n="proxy.versions">已固定版本</span><small data-i18n="proxy.versionsHint">重启不会追踪 latest</small><svg><use href="#i-chevron" /></svg></summary>
               <div class="version-list" id="version-list"></div>
             </details>
             </fieldset>
@@ -151,78 +156,77 @@
           <section class="panel section-card module-card" id="renewal-section">
             <div class="section-heading">
               <span class="section-index">03</span>
-              <div><h2>自动延期</h2><p>每天检查当前免费容器，必要时调用 ACLClouds API</p></div>
-              <label class="module-toggle"><input id="renewal-enabled" data-module-toggle type="checkbox" /><i></i><span>启用</span></label>
+              <div><h2 data-i18n="renewal.title">自动延期</h2><p data-i18n="renewal.subtitle">每天检查当前免费容器，必要时调用 ACLClouds API</p></div>
+              <label class="module-toggle"><input id="renewal-enabled" data-module-toggle type="checkbox" /><i></i><span data-i18n="common.enable">启用</span></label>
             </div>
 
             <fieldset class="module-body" id="renewal-fields">
               <div class="renewal-notice">
-                <strong>只处理当前容器</strong>
-                <p>默认用 ACLClouds 注入的 <code>P_SERVER_UUID</code> 精确匹配 API 返回的服务；不会猜测 UUID，也不会遍历续期账号下的其他服务。</p>
+                <strong data-i18n="renewal.scopeTitle">只处理当前容器</strong>
+                <p data-i18n-rich="renewal.scopeBody">默认用 ACLClouds 注入的 <code>P_SERVER_UUID</code> 精确匹配 API 返回的服务；不会猜测 UUID，也不会遍历续期账号下的其他服务。</p>
               </div>
               <div class="field-grid">
-                <label><span class="field-label">ACLClouds 邮箱 / 用户名</span><input id="acl-username" autocomplete="username" /><small class="field-error" data-renew-error-for="username"></small></label>
-                <label><span class="field-label">ACLClouds 密码</span><input id="acl-password" type="password" autocomplete="current-password" /><small class="field-error" data-renew-error-for="password"></small></label>
-                <label><span class="field-label">Telegram Bot Token <em>可选</em></span><input id="telegram-bot-token" type="password" autocomplete="off" placeholder="留空则仅在 Console 查询" /><small class="field-error" data-renew-error-for="telegramBotToken"></small></label>
-                <label><span class="field-label">Telegram Chat ID <em>可选</em></span><input id="telegram-chat-id" inputmode="numeric" autocomplete="off" placeholder="与 Bot Token 一起填写" /><small class="field-error" data-renew-error-for="telegramChatId"></small></label>
-              </div>
+                <label><span class="field-label" data-i18n="renewal.username">ACLClouds 邮箱 / 用户名</span><input id="acl-username" autocomplete="username" /><small class="field-error" data-renew-error-for="username"></small></label>
+                <label><span class="field-label" data-i18n="renewal.password">ACLClouds 密码</span><input id="acl-password" type="password" autocomplete="current-password" /><small class="field-error" data-renew-error-for="password"></small></label>
+                <label><span class="field-label">Telegram Bot Token <em data-i18n="common.optional">可选</em></span><input id="telegram-bot-token" type="password" autocomplete="off" placeholder="留空则仅在 Console 查询" data-i18n-placeholder="renewal.botTokenPlaceholder" /><small class="field-error" data-renew-error-for="telegramBotToken"></small></label>
+                <label><span class="field-label">Telegram Chat ID <em data-i18n="common.optional">可选</em></span><input id="telegram-chat-id" inputmode="numeric" autocomplete="off" placeholder="与 Bot Token 一起填写" data-i18n-placeholder="renewal.chatIdPlaceholder" /><small class="field-error" data-renew-error-for="telegramChatId"></small></label>
               <div class="remember-row">
-                <label><input id="remember-renewal-secrets" type="checkbox" /><span>在此浏览器记住密码和 Token 等</span></label>
-                <span class="help-tooltip" tabindex="0" role="note" aria-label="默认不把自动延期的账号、密码、Telegram Bot Token 和 Chat ID 写入 localStorage，可减少共享设备或页面脚本被攻击时长期凭证暴露的风险。Service ID 不属于这四项，会继续保存在本地。" data-tooltip="默认不把账号、密码、Bot Token 和 Chat ID 写入 localStorage，可减少共享设备或潜在 XSS 导致长期凭证暴露的风险。">?</span>
+                <label><input id="remember-renewal-secrets" type="checkbox" /><span data-i18n="renewal.remember">在此浏览器记住密码和 Token 等</span></label>
+                <span class="help-tooltip" tabindex="0" role="note" aria-label="默认不把自动延期的账号、密码、Telegram Bot Token 和 Chat ID 写入 localStorage，可减少共享设备或页面脚本被攻击时长期凭证暴露的风险。Service ID 不属于这四项，会继续保存在本地。" data-tooltip="默认不把自动延期的账号、密码、Telegram Bot Token 和 Chat ID 写入 localStorage，可减少共享设备或潜在 XSS 导致长期凭证暴露的风险。" data-i18n-aria-label="renewal.rememberHelp" data-i18n-tooltip="renewal.rememberHelp">?</span>
               </div>
               <details class="advanced">
-                <summary><span>高级设置</span><small>通常留空</small><svg><use href="#i-chevron" /></svg></summary>
-                <label><span class="field-label">Service ID 覆盖</span><input id="acl-server-id" autocomplete="off" placeholder="留空则使用 P_SERVER_UUID" /><small class="field-hint">仅当运行环境未注入 UUID，或 API 返回值无法匹配时填写真实 identifier / UUID。</small><small class="field-error" data-renew-error-for="serverId"></small></label>
+                <summary><span data-i18n="renewal.advanced">高级设置</span><small data-i18n="renewal.advancedHint">通常留空</small><svg><use href="#i-chevron" /></svg></summary>
+                <label><span class="field-label" data-i18n="renewal.serverId">Service ID 覆盖</span><input id="acl-server-id" autocomplete="off" placeholder="留空则使用 P_SERVER_UUID" data-i18n-placeholder="renewal.serverIdPlaceholder" /><small class="field-hint" data-i18n="renewal.serverIdHint">仅当运行环境未注入 UUID，或 API 返回值无法匹配时填写真实 identifier / UUID。</small><small class="field-error" data-renew-error-for="serverId"></small></label>
               </details>
-              <p class="field-hint renewal-hint">启动时检查一次，之后每 24 小时加少量随机延迟检查。结果始终写入本地日志，可在 Console 输入 <code>7</code> 查询；填写完整 Telegram 配置后才额外推送。</p>
+              <p class="field-hint renewal-hint" data-i18n-rich="renewal.schedule">启动时检查一次，之后每 24 小时加少量随机延迟检查；检查失败会在 30 分钟后重试，之后逐次拉长间隔。结果始终写入本地日志，可在 Console 输入 <code>7</code> 查询；填写完整 Telegram 配置后才额外推送。</p>
             </fieldset>
           </section>
 
           <section class="panel section-card update-card">
             <div class="section-heading">
               <span class="section-index">04</span>
-              <div><h2>自动更新</h2><p>跟随 GitHub Stable Channel</p></div>
+              <div><h2 data-i18n="update.title">自动更新</h2><p data-i18n="update.subtitle">跟随 GitHub Stable Channel</p></div>
             </div>
-            <label class="switch-row update-switch"><span><strong>自动获取稳定版</strong><small>启动时检查，运行中约每 6 小时检查；更新失败继续使用本地版本</small></span><input id="auto-update" type="checkbox" checked /><i></i></label>
-            <p class="field-hint update-hint">关闭后 Startup Command 会生成 <code>--AUTO_UPDATE=disable</code>；首次部署仍会下载运行所需文件。</p>
+            <label class="switch-row update-switch"><span><strong data-i18n="update.switch">自动获取稳定版</strong><small data-i18n="update.switchHint">启动时检查，运行中约每 6 小时检查；更新失败继续使用本地版本</small></span><input id="auto-update" type="checkbox" checked /><i></i></label>
+            <p class="field-hint update-hint" data-i18n-rich="update.hint">关闭后 Startup Command 会生成 <code>--AUTO_UPDATE=disable</code>；首次部署仍会下载运行所需文件。</p>
           </section>
 
           <div class="generator-actions">
             <p class="selection-error" id="selection-error" role="alert"></p>
-            <button class="generate-button" type="submit"><span>生成部署配置</span><svg><use href="#i-arrow" /></svg></button>
+            <button class="generate-button" type="submit"><span data-i18n="generate.button">生成部署配置</span><svg><use href="#i-arrow" /></svg></button>
           </div>
         </form>
 
         <aside class="result-column">
           <section class="panel output-panel" id="output-panel">
-            <div class="output-heading"><div><span class="status-dot"></span><strong>生成结果</strong><small id="output-status">等待填写配置</small></div><span class="local-only"><svg><use href="#i-lock" /></svg>LOCAL ONLY</span></div>
+            <div class="output-heading"><div><span class="status-dot"></span><strong data-i18n="output.title">生成结果</strong><small id="output-status">等待填写配置</small></div><span class="local-only"><svg><use href="#i-lock" /></svg>LOCAL ONLY</span></div>
 
             <div class="empty-output" id="empty-output">
               <span><svg><use href="#i-terminal" /></svg></span>
-              <strong>配置会出现在这里</strong>
-              <p>启用需要的服务并完成对应配置，然后点击“生成部署配置”。</p>
+              <strong data-i18n="output.emptyTitle">配置会出现在这里</strong>
+              <p data-i18n="output.emptyBody">启用需要的服务并完成对应配置，然后点击“生成部署配置”。</p>
             </div>
 
             <div id="generated-output" hidden>
               <article class="code-card">
-                <div class="code-heading"><div><span class="file-dot"></span><strong>config.env</strong><small>Files → Create File</small></div><button class="copy-button" type="button" data-copy="env"><svg><use href="#i-copy" /></svg><span>复制 config.env</span></button></div>
+                <div class="code-heading"><div><span class="file-dot"></span><strong>config.env</strong><small>Files → Create File</small></div><button class="copy-button" type="button" data-copy="env"><svg><use href="#i-copy" /></svg><span data-i18n="output.copyEnv">复制 config.env</span></button></div>
                 <pre><code id="env-output"></code></pre>
               </article>
               <article class="code-card startup-card">
-                <div class="code-heading"><div><span class="file-dot amber"></span><strong>Startup Command</strong><small>Startup → Command</small></div><button class="copy-button" type="button" data-copy="startup"><svg><use href="#i-copy" /></svg><span>复制命令</span></button></div>
+                <div class="code-heading"><div><span class="file-dot amber"></span><strong>Startup Command</strong><small>Startup → Command</small></div><button class="copy-button" type="button" data-copy="startup"><svg><use href="#i-copy" /></svg><span data-i18n="output.copyStartup">复制命令</span></button></div>
                 <pre><code id="startup-output"></code></pre>
               </article>
             </div>
           </section>
 
           <section class="panel steps-panel">
-            <div class="steps-heading"><div class="eyebrow">FROM ZERO TO ONLINE</div><h2>部署步骤</h2></div>
+            <div class="steps-heading"><div class="eyebrow">FROM ZERO TO ONLINE</div><h2 data-i18n="steps.title">部署步骤</h2></div>
             <ol>
-              <li><span>1</span><div><strong>打开 Files</strong><p>进入 ACLClouds Bot 的文件管理器。</p></div></li>
-              <li><span>2</span><div><strong>创建 config.env</strong><p>Create File → 名称填 <code>config</code> → 类型选 Env (.env)，粘贴配置。</p></div></li>
-              <li><span>3</span><div><strong>设置 Startup Command</strong><p>进入 Startup，粘贴上方生成的固定 bootstrap 命令；以后无需修改版本 URL。</p></div></li>
-              <li><span>4</span><div><strong>Restart</strong><p>等待 Console 显示 Server marked as running 和已启用服务状态；启用代理时会输出 VLESS 链接。</p></div></li>
-              <li><span>5</span><div><strong>Console 查询</strong><p>启用代理后输入 <code>2</code> 找回链接；启用自动延期后输入 <code>7</code> 查看最近检查结果。</p></div></li>
+              <li><span>1</span><div><strong data-i18n="steps.filesTitle">打开 Files</strong><p data-i18n="steps.filesBody">进入 ACLClouds Bot 的文件管理器。</p></div></li>
+              <li><span>2</span><div><strong data-i18n="steps.configTitle">创建 config.env</strong><p data-i18n-rich="steps.configBody">Create File → 名称填 <code>config</code> → 类型选 Env (.env)，粘贴配置。</p></div></li>
+              <li><span>3</span><div><strong data-i18n="steps.startupTitle">设置 Startup Command</strong><p data-i18n="steps.startupBody">进入 Startup，粘贴上方生成的固定 bootstrap 命令；以后无需修改版本 URL。</p></div></li>
+              <li><span>4</span><div><strong data-i18n="steps.restartTitle">Restart</strong><p data-i18n="steps.restartBody">等待 Console 显示 Server marked as running 和已启用服务状态；启用代理时会输出 VLESS 链接。</p></div></li>
+              <li><span>5</span><div><strong data-i18n="steps.consoleTitle">Console 查询</strong><p data-i18n-rich="steps.consoleBody">启用代理后输入 <code>2</code> 找回链接；启用自动延期后输入 <code>7</code> 查看最近检查结果。</p></div></li>
             </ol>
           </section>
         </aside>

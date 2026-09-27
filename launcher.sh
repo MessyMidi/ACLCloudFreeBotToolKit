@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-LAUNCHER_VERSION='0.6.0-beta.1'
+LAUNCHER_VERSION='0.6.0'
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$BASE_DIR/bin"
@@ -102,6 +102,13 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# Settings stay exported for compatibility with configurations that pass extra
+# variables to the agents, but credentials must never reach Mihomo or a
+# monitor agent through their environment. The agent token is handed to the
+# agent explicitly when it starts.
+export -n ACL_USERNAME ACL_EMAIL ACL_PASSWORD TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID \
+    MONITOR_TOKEN KOMARI_TOKEN CFSM_SECRET
+
 # ---------------- Defaults ----------------
 
 MIHOMO_ENABLED="${MIHOMO_ENABLED:-1}"
@@ -126,9 +133,12 @@ MONITOR_ENDPOINT="${MONITOR_ENDPOINT:-${KOMARI_ENDPOINT:-}}"
 MONITOR_TOKEN="${MONITOR_TOKEN:-${KOMARI_TOKEN:-}}"
 MONITOR_REMOTE_CONTROL="${MONITOR_REMOTE_CONTROL:-false}"
 AUTO_RENEW_ENABLED="${AUTO_RENEW_ENABLED:-0}"
+MIHOMO_BLOCK_PRIVATE_NETWORKS="${MIHOMO_BLOCK_PRIVATE_NETWORKS:-1}"
 WATCHDOG_MAX_RESTARTS="${WATCHDOG_MAX_RESTARTS:-5}"
 WATCHDOG_BASE_DELAY_SECONDS="${WATCHDOG_BASE_DELAY_SECONDS:-1}"
 WATCHDOG_STABLE_SECONDS="${WATCHDOG_STABLE_SECONDS:-300}"
+LOG_MAX_BYTES="${LOG_MAX_BYTES:-5242880}"
+CONSOLE_LANG="${CONSOLE_LANG:-zh}"
 
 case "${AUTO_RENEW_ENABLED,,}" in
     1|true|yes|on|enable|enabled) RENEW_ENABLED=1 ;;
@@ -136,20 +146,43 @@ case "${AUTO_RENEW_ENABLED,,}" in
     *) die "AUTO_RENEW_ENABLED must be a boolean value" ;;
 esac
 
+case "${CONSOLE_LANG,,}" in
+    zh|zh-cn|zh_cn) CONSOLE_LANG='zh' ;;
+    en|en-us|en_us) CONSOLE_LANG='en' ;;
+    *)
+        warn "CONSOLE_LANG must be zh or en; using zh"
+        CONSOLE_LANG='zh'
+        ;;
+esac
+
+valid_port() {
+    [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
+}
+
+# host:port with a DNS name or IPv4 address, or [address]:port for IPv6.
+# Accepts at least everything the Web generator accepts.
+valid_destination() {
+    local name_pattern='^[A-Za-z0-9._-]+:([0-9]{1,5})$'
+    local ipv6_pattern='^\[[0-9A-Fa-f:.]+\]:([0-9]{1,5})$'
+    [[ "$1" =~ $name_pattern || "$1" =~ $ipv6_pattern ]] && valid_port "${BASH_REMATCH[1]}"
+}
+
 [[ "$MIHOMO_ENABLED" == "0" || "$MIHOMO_ENABLED" == "1" ]] || die "MIHOMO_ENABLED must be 0 or 1"
 [[ "$MONITOR_ENABLED" == "0" || "$MONITOR_ENABLED" == "1" ]] || die "MONITOR_ENABLED must be 0 or 1"
+[[ "$MIHOMO_BLOCK_PRIVATE_NETWORKS" == "0" || "$MIHOMO_BLOCK_PRIVATE_NETWORKS" == "1" ]] || die "MIHOMO_BLOCK_PRIVATE_NETWORKS must be 0 or 1"
 [[ "$WATCHDOG_MAX_RESTARTS" =~ ^[0-9]+$ ]] && (( WATCHDOG_MAX_RESTARTS >= 1 && WATCHDOG_MAX_RESTARTS <= 10 )) || die "WATCHDOG_MAX_RESTARTS must be between 1 and 10"
 [[ "$WATCHDOG_BASE_DELAY_SECONDS" =~ ^[0-9]+$ ]] && (( WATCHDOG_BASE_DELAY_SECONDS <= 60 )) || die "WATCHDOG_BASE_DELAY_SECONDS must be between 0 and 60"
 [[ "$WATCHDOG_STABLE_SECONDS" =~ ^[0-9]+$ ]] && (( WATCHDOG_STABLE_SECONDS >= 1 && WATCHDOG_STABLE_SECONDS <= 86400 )) || die "WATCHDOG_STABLE_SECONDS must be between 1 and 86400"
+[[ "$LOG_MAX_BYTES" =~ ^[0-9]+$ ]] && (( LOG_MAX_BYTES >= 1024 )) || die "LOG_MAX_BYTES must be at least 1024"
 [[ "$MIHOMO_ENABLED" == "1" || "$MONITOR_ENABLED" == "1" || "$RENEW_ENABLED" == "1" ]] || \
     die "At least one of Mihomo, Monitor, or automatic renewal must be enabled"
 
 if [[ "$MIHOMO_ENABLED" == "1" ]]; then
     : "${SERVER_IP:?ACLClouds did not provide SERVER_IP}"
     : "${SERVER_PORT:?ACLClouds did not provide SERVER_PORT}"
-    [[ "$SERVER_PORT" =~ ^[0-9]+$ ]] || die "SERVER_PORT is not numeric: $SERVER_PORT"
+    valid_port "$SERVER_PORT" || die "SERVER_PORT is not a valid port: $SERVER_PORT"
     [[ "$REALITY_SNI" =~ ^[A-Za-z0-9._-]+$ ]] || die "REALITY_SNI contains unsupported characters"
-    [[ "$REALITY_DEST" =~ ^[A-Za-z0-9._:-]+$ ]] || die "REALITY_DEST contains unsupported characters"
+    valid_destination "$REALITY_DEST" || die "REALITY_DEST must be host:port, or [address]:port for IPv6"
     [[ "$CLIENT_FINGERPRINT" =~ ^[A-Za-z0-9._-]+$ ]] || die "CLIENT_FINGERPRINT contains unsupported characters"
     [[ "$MIHOMO_REMARK" =~ ^[A-Za-z0-9._-]+$ ]] || die "MIHOMO_REMARK contains unsupported characters"
 fi
@@ -221,9 +254,18 @@ download() {
     log "Downloading: $url"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 -o "$tmp" "$url"
+        # A transfer slower than 4 KiB/s for a whole minute is treated as
+        # stalled instead of hanging the launcher indefinitely.
+        if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 \
+            --speed-limit 4096 --speed-time 60 --max-time 900 -o "$tmp" "$url"; then
+            rm -f "$tmp"
+            return 1
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -O "$tmp" "$url"
+        if ! wget --timeout=60 --tries=3 -O "$tmp" "$url"; then
+            rm -f "$tmp"
+            return 1
+        fi
     else
         die "Neither curl nor wget is available"
     fi
@@ -322,6 +364,62 @@ show_log_tail() {
     else
         cat "$file"
     fi
+}
+
+# Services keep their log open in append mode for as long as they run, so an
+# oversized log is rewritten in place, keeping only its newest part. Lines
+# written while the copy is made may be lost.
+trim_log() {
+    local file="$1"
+    local size temporary
+
+    [[ -f "$file" ]] || return 0
+    size="$(wc -c < "$file")"
+    (( size > LOG_MAX_BYTES )) || return 0
+    temporary="${file}.trim.$$"
+    if tail -c "$((LOG_MAX_BYTES / 5))" "$file" > "$temporary"; then
+        {
+            printf '[launcher] --- older lines removed; the log exceeded %s bytes ---\n' "$LOG_MAX_BYTES"
+            cat "$temporary"
+        } > "$file"
+    fi
+    rm -f "$temporary"
+}
+
+NEXT_LOG_TRIM_AT=0
+
+maintain_logs() {
+    (( SECONDS >= NEXT_LOG_TRIM_AT )) || return 0
+    NEXT_LOG_TRIM_AT=$((SECONDS + 10))
+    trim_log "$MIHOMO_LOG"
+    trim_log "$MONITOR_LOG"
+}
+
+# Bootstrap waits for the ready file to contain LAUNCHER_GENERATION. While
+# runtime files are downloading it contains "installing <generation>", which
+# bootstrap measures against a separate, longer timeout.
+write_bootstrap_signal() {
+    local ready_file="${LAUNCHER_READY_FILE:-}"
+    local temporary
+
+    [[ -n "$ready_file" && -n "${LAUNCHER_GENERATION:-}" ]] || return 0
+    temporary="${ready_file}.tmp.$$"
+    printf '%s\n' "$1" > "$temporary"
+    chmod 600 "$temporary"
+    mv -f "$temporary" "$ready_file"
+}
+
+signal_bootstrap_installing() {
+    write_bootstrap_signal "installing ${LAUNCHER_GENERATION:-}"
+}
+
+signal_bootstrap_installed() {
+    [[ -n "${LAUNCHER_READY_FILE:-}" ]] || return 0
+    rm -f "$LAUNCHER_READY_FILE"
+}
+
+signal_bootstrap_ready() {
+    write_bootstrap_signal "${LAUNCHER_GENERATION:-}"
 }
 
 # ---------------- Install Mihomo ----------------
@@ -460,6 +558,8 @@ generate_cfsm_config() {
     mv -f "$temporary" "$CFSM_CONFIG"
 }
 
+signal_bootstrap_installing
+
 if [[ "$MIHOMO_ENABLED" == "1" ]]; then
     install_mihomo
 fi
@@ -470,6 +570,8 @@ if [[ "$MONITOR_ENABLED" == "1" ]]; then
     install_monitor
     generate_cfsm_config
 fi
+
+signal_bootstrap_installed
 
 # ---------------- Persistent credentials ----------------
 
@@ -524,7 +626,10 @@ fi
 # ---------------- Generate Mihomo config ----------------
 
 generate_mihomo_config() {
-    cat > "$MIHOMO_CONFIG" <<EOF
+    local cidr
+
+    {
+        cat <<EOF
 mode: rule
 log-level: $MIHOMO_LOGLEVEL
 allow-lan: true
@@ -548,8 +653,21 @@ listeners:
         - "$REALITY_SNI"
 
 rules:
-  - MATCH,DIRECT
 EOF
+        if [[ "$MIHOMO_BLOCK_PRIVATE_NETWORKS" == "1" ]]; then
+            # Proxy users must not reach the host's private networks, loopback
+            # services, or cloud metadata endpoints through this node. Domains
+            # are resolved first, so names pointing at such addresses are
+            # rejected as well.
+            for cidr in 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16; do
+                printf '  - IP-CIDR,%s,REJECT\n' "$cidr"
+            done
+            for cidr in ::1/128 fc00::/7 fe80::/10; do
+                printf '  - IP-CIDR6,%s,REJECT\n' "$cidr"
+            done
+        fi
+        printf '  - MATCH,DIRECT\n'
+    } > "$MIHOMO_CONFIG"
 
     if ! "$MIHOMO_BIN" -t -f "$MIHOMO_CONFIG" >"$LOG_DIR/mihomo-test.log" 2>&1; then
         cat "$LOG_DIR/mihomo-test.log" >&2 || true
@@ -565,32 +683,17 @@ fi
 
 MIHOMO_PID=""
 MONITOR_PID=""
-MIHOMO_WATCHDOG_RESTARTS=0
-MONITOR_WATCHDOG_RESTARTS=0
-MIHOMO_WATCHDOG_NEXT_AT=""
-MONITOR_WATCHDOG_NEXT_AT=""
-MIHOMO_WATCHDOG_GAVE_UP=0
-MONITOR_WATCHDOG_GAVE_UP=0
-MIHOMO_STARTED_AT=0
-MONITOR_STARTED_AT=0
+# Watchdog state per service, keyed by MIHOMO or MONITOR.
+declare -A STARTED_AT=([MIHOMO]=0 [MONITOR]=0)
+declare -A WATCHDOG_RESTARTS=([MIHOMO]=0 [MONITOR]=0)
+declare -A WATCHDOG_NEXT_AT=([MIHOMO]='' [MONITOR]='')
+declare -A WATCHDOG_GAVE_UP=([MIHOMO]=0 [MONITOR]=0)
 
 signal_pterodactyl_ready() {
     # ACLClouds uses the Parkervcp/Pelican "golang generic" Egg. Its
     # startup.done value is the exact text below; Wings remains in STARTING
     # until this line appears in Console output.
     printf '%s\n' 'change this part'
-}
-
-signal_bootstrap_ready() {
-    local ready_file="${LAUNCHER_READY_FILE:-}"
-    local generation="${LAUNCHER_GENERATION:-}"
-    local temporary
-
-    [[ -n "$ready_file" && -n "$generation" ]] || return 0
-    temporary="${ready_file}.tmp.$$"
-    printf '%s\n' "$generation" > "$temporary"
-    chmod 600 "$temporary"
-    mv -f "$temporary" "$ready_file"
 }
 
 start_mihomo() {
@@ -604,21 +707,15 @@ start_mihomo() {
     sleep 1
     if ! is_alive "$MIHOMO_PID"; then
         printf '\n--- Mihomo startup log ---\n' >&2
-        cat "$MIHOMO_LOG" >&2 || true
+        show_log_tail "$MIHOMO_LOG" 40 >&2 || true
         warn "Mihomo failed to start"
         wait "$MIHOMO_PID" 2>/dev/null || true
         MIHOMO_PID=""
         return 1
     fi
 
-    MIHOMO_STARTED_AT=$SECONDS
+    STARTED_AT[MIHOMO]=$SECONDS
     log "Mihomo started (PID $MIHOMO_PID)"
-}
-
-reset_mihomo_watchdog() {
-    MIHOMO_WATCHDOG_RESTARTS=0
-    MIHOMO_WATCHDOG_NEXT_AT=""
-    MIHOMO_WATCHDOG_GAVE_UP=0
 }
 
 restart_mihomo() {
@@ -630,7 +727,7 @@ restart_mihomo() {
     log "Restarting Mihomo..."
     stop_pid "$MIHOMO_PID"
     MIHOMO_PID=""
-    reset_mihomo_watchdog
+    reset_watchdog MIHOMO
     generate_mihomo_config
     start_mihomo || warn "Mihomo manual restart failed; watchdog will retry"
 }
@@ -668,19 +765,13 @@ start_monitor() {
     sleep 1
     if ! is_alive "$MONITOR_PID"; then
         warn "Monitor Agent exited during startup"
-        cat "$MONITOR_LOG" >&2 || true
+        show_log_tail "$MONITOR_LOG" 40 >&2 || true
         MONITOR_PID=""
         return 1
     fi
 
-    MONITOR_STARTED_AT=$SECONDS
+    STARTED_AT[MONITOR]=$SECONDS
     log "Monitor started ($MONITOR_TYPE, PID $MONITOR_PID)"
-}
-
-reset_monitor_watchdog() {
-    MONITOR_WATCHDOG_RESTARTS=0
-    MONITOR_WATCHDOG_NEXT_AT=""
-    MONITOR_WATCHDOG_GAVE_UP=0
 }
 
 restart_monitor() {
@@ -692,7 +783,7 @@ restart_monitor() {
     log "Restarting Monitor..."
     stop_pid "$MONITOR_PID"
     MONITOR_PID=""
-    reset_monitor_watchdog
+    reset_watchdog MONITOR
     start_monitor || true
 }
 
@@ -706,87 +797,67 @@ watchdog_delay() {
     printf '%s' "$delay"
 }
 
-supervise_mihomo() {
-    [[ "$MIHOMO_ENABLED" == "1" ]] || return 0
-
-    if is_alive "$MIHOMO_PID"; then
-        if (( MIHOMO_WATCHDOG_RESTARTS > 0 && SECONDS - MIHOMO_STARTED_AT >= WATCHDOG_STABLE_SECONDS )); then
-            log "Mihomo remained stable for ${WATCHDOG_STABLE_SECONDS}s; watchdog counter reset"
-            reset_mihomo_watchdog
-        fi
-        return 0
-    fi
-
-    if [[ -n "$MIHOMO_PID" ]]; then
-        local exit_status=0
-        wait "$MIHOMO_PID" 2>/dev/null || exit_status=$?
-        warn "Mihomo exited unexpectedly (status $exit_status)"
-        MIHOMO_PID=""
-    fi
-    [[ "$MIHOMO_WATCHDOG_GAVE_UP" -eq 0 ]] || return 0
-
-    if [[ -z "$MIHOMO_WATCHDOG_NEXT_AT" ]]; then
-        if (( MIHOMO_WATCHDOG_RESTARTS >= WATCHDOG_MAX_RESTARTS )); then
-            MIHOMO_WATCHDOG_GAVE_UP=1
-            warn "Mihomo watchdog stopped after ${WATCHDOG_MAX_RESTARTS} restart attempts; use Console option 5 to retry manually"
-            return 0
-        fi
-        MIHOMO_WATCHDOG_RESTARTS=$((MIHOMO_WATCHDOG_RESTARTS + 1))
-        local delay
-        delay="$(watchdog_delay "$MIHOMO_WATCHDOG_RESTARTS")"
-        MIHOMO_WATCHDOG_NEXT_AT=$((SECONDS + delay))
-        warn "Mihomo crashed; watchdog restart ${MIHOMO_WATCHDOG_RESTARTS}/${WATCHDOG_MAX_RESTARTS} scheduled in ${delay}s"
-    fi
-
-    if (( SECONDS >= MIHOMO_WATCHDOG_NEXT_AT )); then
-        MIHOMO_WATCHDOG_NEXT_AT=""
-        log "Watchdog restarting Mihomo (${MIHOMO_WATCHDOG_RESTARTS}/${WATCHDOG_MAX_RESTARTS})"
-        start_mihomo || true
-    fi
+reset_watchdog() {
+    local service="$1"
+    WATCHDOG_RESTARTS[$service]=0
+    WATCHDOG_NEXT_AT[$service]=''
+    WATCHDOG_GAVE_UP[$service]=0
 }
 
-supervise_monitor() {
-    [[ "$MONITOR_ENABLED" == "1" ]] || return 0
+# Restarts a crashed service with exponential backoff and gives up after
+# WATCHDOG_MAX_RESTARTS attempts until the Console restart option is used.
+# SERVICE is MIHOMO or MONITOR; its PID is kept in <SERVICE>_PID.
+supervise_service() {
+    local service="$1"
+    local name="$2"
+    local console_option="$3"
+    local start_function="$4"
+    local pid_variable="${service}_PID"
+    local pid="${!pid_variable}"
+    local exit_status delay
 
-    if is_alive "$MONITOR_PID"; then
-        if (( MONITOR_WATCHDOG_RESTARTS > 0 && SECONDS - MONITOR_STARTED_AT >= WATCHDOG_STABLE_SECONDS )); then
-            log "Monitor remained stable for ${WATCHDOG_STABLE_SECONDS}s; watchdog counter reset"
-            reset_monitor_watchdog
+    if is_alive "$pid"; then
+        if (( WATCHDOG_RESTARTS[$service] > 0 && SECONDS - STARTED_AT[$service] >= WATCHDOG_STABLE_SECONDS )); then
+            log "$name remained stable for ${WATCHDOG_STABLE_SECONDS}s; watchdog counter reset"
+            reset_watchdog "$service"
         fi
         return 0
     fi
 
-    if [[ -n "$MONITOR_PID" ]]; then
-        local exit_status=0
-        wait "$MONITOR_PID" 2>/dev/null || exit_status=$?
-        warn "Monitor exited unexpectedly (status $exit_status)"
-        MONITOR_PID=""
+    if [[ -n "$pid" ]]; then
+        exit_status=0
+        wait "$pid" 2>/dev/null || exit_status=$?
+        warn "$name exited unexpectedly (status $exit_status)"
+        printf -v "$pid_variable" '%s' ''
     fi
-    [[ "$MONITOR_WATCHDOG_GAVE_UP" -eq 0 ]] || return 0
+    [[ "${WATCHDOG_GAVE_UP[$service]}" -eq 0 ]] || return 0
 
-    if [[ -z "$MONITOR_WATCHDOG_NEXT_AT" ]]; then
-        if (( MONITOR_WATCHDOG_RESTARTS >= WATCHDOG_MAX_RESTARTS )); then
-            MONITOR_WATCHDOG_GAVE_UP=1
-            warn "Monitor watchdog stopped after ${WATCHDOG_MAX_RESTARTS} restart attempts; use Console option 6 to retry manually"
+    if [[ -z "${WATCHDOG_NEXT_AT[$service]}" ]]; then
+        if (( WATCHDOG_RESTARTS[$service] >= WATCHDOG_MAX_RESTARTS )); then
+            WATCHDOG_GAVE_UP[$service]=1
+            warn "$name watchdog stopped after ${WATCHDOG_MAX_RESTARTS} restart attempts; use Console option $console_option to retry manually"
             return 0
         fi
-        MONITOR_WATCHDOG_RESTARTS=$((MONITOR_WATCHDOG_RESTARTS + 1))
-        local delay
-        delay="$(watchdog_delay "$MONITOR_WATCHDOG_RESTARTS")"
-        MONITOR_WATCHDOG_NEXT_AT=$((SECONDS + delay))
-        warn "Monitor crashed; watchdog restart ${MONITOR_WATCHDOG_RESTARTS}/${WATCHDOG_MAX_RESTARTS} scheduled in ${delay}s"
+        WATCHDOG_RESTARTS[$service]=$((WATCHDOG_RESTARTS[$service] + 1))
+        delay="$(watchdog_delay "${WATCHDOG_RESTARTS[$service]}")"
+        WATCHDOG_NEXT_AT[$service]=$((SECONDS + delay))
+        warn "$name crashed; watchdog restart ${WATCHDOG_RESTARTS[$service]}/${WATCHDOG_MAX_RESTARTS} scheduled in ${delay}s"
     fi
 
-    if (( SECONDS >= MONITOR_WATCHDOG_NEXT_AT )); then
-        MONITOR_WATCHDOG_NEXT_AT=""
-        log "Watchdog restarting Monitor (${MONITOR_WATCHDOG_RESTARTS}/${WATCHDOG_MAX_RESTARTS})"
-        start_monitor || true
+    if (( SECONDS >= WATCHDOG_NEXT_AT[$service] )); then
+        WATCHDOG_NEXT_AT[$service]=''
+        log "Watchdog restarting $name (${WATCHDOG_RESTARTS[$service]}/${WATCHDOG_MAX_RESTARTS})"
+        "$start_function" || true
     fi
 }
 
 supervise_services() {
-    supervise_mihomo
-    supervise_monitor
+    if [[ "$MIHOMO_ENABLED" == "1" ]]; then
+        supervise_service MIHOMO Mihomo 5 start_mihomo
+    fi
+    if [[ "$MONITOR_ENABLED" == "1" ]]; then
+        supervise_service MONITOR Monitor 6 start_monitor
+    fi
 }
 
 cleanup() {
@@ -849,7 +920,7 @@ show_status() {
         printf 'Mihomo : DISABLED\n'
     elif is_alive "$MIHOMO_PID"; then
         printf 'Mihomo : RUNNING (PID %s, %s)\n' "$MIHOMO_PID" "$(pid_rss "$MIHOMO_PID")"
-    elif [[ "$MIHOMO_WATCHDOG_GAVE_UP" -eq 1 ]]; then
+    elif [[ "${WATCHDOG_GAVE_UP[MIHOMO]}" -eq 1 ]]; then
         printf 'Mihomo : STOPPED (watchdog gave up after %s attempts)\n' "$WATCHDOG_MAX_RESTARTS"
     else
         printf 'Mihomo : STOPPED\n'
@@ -859,7 +930,7 @@ show_status() {
         printf 'Monitor : DISABLED\n'
     elif is_alive "$MONITOR_PID"; then
         printf 'Monitor : RUNNING (%s, PID %s, %s)\n' "$MONITOR_TYPE" "$MONITOR_PID" "$(pid_rss "$MONITOR_PID")"
-    elif [[ "$MONITOR_WATCHDOG_GAVE_UP" -eq 1 ]]; then
+    elif [[ "${WATCHDOG_GAVE_UP[MONITOR]}" -eq 1 ]]; then
         printf 'Monitor : STOPPED (%s, watchdog gave up after %s attempts)\n' "$MONITOR_TYPE" "$WATCHDOG_MAX_RESTARTS"
     else
         printf 'Monitor : STOPPED (%s)\n' "$MONITOR_TYPE"
@@ -898,20 +969,41 @@ show_renew_log() {
     printf '\n'
 }
 
+if [[ "$CONSOLE_LANG" == "en" ]]; then
+    MENU_ITEMS=(
+        '[1] Service status'
+        '[2] Proxy link'
+        '[3] Mihomo log (last 120 lines)'
+        '[4] Monitor log (last 120 lines)'
+        '[5] Restart Mihomo'
+        '[6] Restart Monitor'
+        '[7] Renewal log (last 120 lines)'
+        '[0] Show menu'
+    )
+    MENU_PROMPT='Enter a number: '
+    MENU_UNKNOWN='Unknown option:'
+else
+    MENU_ITEMS=(
+        '[1] 服务状态'
+        '[2] 代理链接'
+        '[3] Mihomo 日志（最近 120 行）'
+        '[4] Monitor 日志（最近 120 行）'
+        '[5] 重启 Mihomo'
+        '[6] 重启 Monitor'
+        '[7] 自动延期日志（最近 120 行）'
+        '[0] 显示菜单'
+    )
+    MENU_PROMPT='请输入数字: '
+    MENU_UNKNOWN='未知选项:'
+fi
+
 show_menu() {
     printf '%s\n' '=========================================='
     printf '%s\n' ' ACLClouds Bot Toolkit'
     printf '%s\n' '=========================================='
-    printf '%s\n' '[1] 服务状态'
-    printf '%s\n' '[2] 代理链接'
-    printf '%s\n' '[3] Mihomo 日志（最近 120 行）'
-    printf '%s\n' '[4] Monitor 日志（最近 120 行）'
-    printf '%s\n' '[5] 重启 Mihomo'
-    printf '%s\n' '[6] 重启 Monitor'
-    printf '%s\n' '[7] 自动延期日志（最近 120 行）'
-    printf '%s\n' '[0] 显示菜单'
+    printf '%s\n' "${MENU_ITEMS[@]}"
     printf '%s\n' '------------------------------------------'
-    printf '%s' '请输入数字: '
+    printf '%s' "$MENU_PROMPT"
 }
 
 : > "$MIHOMO_LOG"
@@ -922,7 +1014,7 @@ if ! start_mihomo; then
 fi
 start_monitor || true
 
-log "Startup completed"
+log "Startup completed (launcher $LAUNCHER_VERSION)"
 signal_pterodactyl_ready
 signal_bootstrap_ready
 show_status
@@ -933,6 +1025,7 @@ show_menu
 
 while true; do
     supervise_services
+    maintain_logs
     read_status=0
     IFS= read -r -t 1 choice || read_status=$?
     if (( read_status != 0 )); then
@@ -977,9 +1070,9 @@ while true; do
             continue
             ;;
         *)
-            printf '未知选项: %s\n' "$choice"
+            printf '%s %s\n' "$MENU_UNKNOWN" "$choice"
             ;;
     esac
 
-    printf '%s' '请输入数字: '
+    printf '%s' "$MENU_PROMPT"
 done

@@ -7,7 +7,7 @@
  * see /ADDITIONAL_TERMS.md
  */
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { resolveGo } from './go-tool.mjs';
@@ -15,6 +15,7 @@ import { resolveGo } from './go-tool.mjs';
 const root = resolve(import.meta.dirname, '..');
 const outputDirectory = resolve(root, 'build');
 const output = resolve(outputDirectory, 'acl-renew-linux-amd64');
+const { version } = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
 await mkdir(outputDirectory, { recursive: true });
 const go = await resolveGo(root);
 const goEnvironment = {
@@ -25,7 +26,8 @@ const goEnvironment = {
   GOOS: 'linux',
   GOARCH: 'amd64'
 };
-const result = spawnSync(go, ['build', '-buildvcs=false', '-trimpath', '-ldflags=-s -w', '-o', output, './cmd/acl-renew'], {
+const ldflags = `-s -w -X main.version=${version}`;
+const result = spawnSync(go, ['build', '-buildvcs=false', '-trimpath', `-ldflags=${ldflags}`, '-o', output, './cmd/acl-renew'], {
   cwd: root,
   env: goEnvironment,
   stdio: 'inherit'

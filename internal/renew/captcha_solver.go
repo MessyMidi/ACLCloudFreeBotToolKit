@@ -146,16 +146,40 @@ func matchImage(colP, rowP []float64) (string, float64) {
 	bestScore := -9999.0
 
 	for _, ref := range precomputedRef {
-		cScore := alignCorr(colP, ref.colProfile)
-		rScore := alignCorr(rowP, ref.rowProfile)
-		score := cScore*captchaWeightCol + rScore*captchaWeightRow
-
+		score := referenceScore(colP, rowP, ref)
 		if score > bestScore {
 			bestScore = score
 			bestWord = ref.word
 		}
 	}
 	return bestWord, bestScore
+}
+
+// referenceScore is the weighted column and row correlation between an image
+// and one reference word.
+func referenceScore(colP, rowP []float64, ref precomputedWord) float64 {
+	return alignCorr(colP, ref.colProfile)*captchaWeightCol + alignCorr(rowP, ref.rowProfile)*captchaWeightRow
+}
+
+func referenceFor(word string) (precomputedWord, bool) {
+	for _, ref := range precomputedRef {
+		if ref.word == word {
+			return ref, true
+		}
+	}
+	return precomputedWord{}, false
+}
+
+// CaptchaProfiles decodes a CAPTCHA option image and returns its column and
+// row profiles. The reference generator (./genref) uses it so the baked-in
+// references are computed exactly like the images compared at runtime.
+func CaptchaProfiles(data []byte) ([]float64, []float64, error) {
+	pixels, width, height, err := decodeCaptchaImage(data)
+	if err != nil {
+		return nil, nil, err
+	}
+	colP, rowP := extractProfiles(pixels, width, height)
+	return colP, rowP, nil
 }
 
 // decodeCaptchaImage decodes a PNG image from raw bytes, converts it to
@@ -195,12 +219,17 @@ func solveCaptcha(ctx context.Context, s *session, captchaContext string) (strin
 		return "", fmt.Errorf("fetch captcha challenge: %w", err)
 	}
 	log.Printf("[captcha] challenge received: target=%q options=%d", chal.Target, len(chal.Options))
+	target, ok := referenceFor(chal.Target)
+	if !ok {
+		return "", fmt.Errorf("no reference profile for CAPTCHA word %q; the reference data needs updating (see internal/renew/genref)", chal.Target)
+	}
 
-	// Step 2: Download and match each option image.
+	// Step 2: Download each option image and compare it with the references.
 	type match struct {
-		word  string
-		score float64
-		token string
+		word        string
+		score       float64
+		targetScore float64
+		token       string
 	}
 	var matches []match
 
@@ -210,37 +239,37 @@ func solveCaptcha(ctx context.Context, s *session, captchaContext string) (strin
 			log.Printf("[captcha] WARNING: failed to download an option image: %v", err)
 			continue
 		}
-		pixels, width, height, err := decodeCaptchaImage(imgData)
+		colP, rowP, err := CaptchaProfiles(imgData)
 		if err != nil {
 			log.Printf("[captcha] WARNING: failed to decode option image: %v", err)
 			continue
 		}
-		colP, rowP := extractProfiles(pixels, width, height)
 		word, score := matchImage(colP, rowP)
-		matches = append(matches, match{word: word, score: score, token: token})
-		log.Printf("[captcha] option[%d]: matched=%q score=%.3f", len(matches)-1, word, score)
+		targetScore := referenceScore(colP, rowP, target)
+		matches = append(matches, match{word: word, score: score, targetScore: targetScore, token: token})
+		log.Printf("[captcha] option[%d]: matched=%q score=%.3f target_score=%.3f", len(matches)-1, word, score, targetScore)
 	}
 
 	if len(matches) == 0 {
 		return "", errors.New("no captcha option images could be processed")
 	}
 
-	// Step 3: Select the option whose matched word equals the target.
+	// Step 3: Prefer the options whose best match is the target word. If
+	// several are, or none is, take the option most similar to the target.
 	var selected *match
+	confident := false
 	for i := range matches {
-		if matches[i].word == chal.Target {
+		isTarget := matches[i].word == chal.Target
+		if selected == nil || (isTarget && !confident) ||
+			(isTarget == confident && matches[i].targetScore > selected.targetScore) {
 			selected = &matches[i]
-			break
+			confident = isTarget
 		}
 	}
-	if selected == nil {
-		// Log all matches for debugging.
-		for _, m := range matches {
-			log.Printf("[captcha] available: word=%q score=%.3f", m.word, m.score)
-		}
-		return "", fmt.Errorf("no option matched target %q", chal.Target)
+	if !confident {
+		log.Printf("[captcha] WARNING: no option was recognised as %q; submitting the closest match", chal.Target)
 	}
-	log.Printf("[captcha] selected: option word=%q score=%.3f", selected.word, selected.score)
+	log.Printf("[captcha] selected: option word=%q target_score=%.3f", selected.word, selected.targetScore)
 
 	// Step 4: Submit the answer.
 	verifyBody := map[string]any{
@@ -347,6 +376,8 @@ func fetchCaptchaImage(ctx context.Context, s *session, token string) ([]byte, e
 
 	resp, err := s.client.Do(req)
 	if err != nil {
+		// The error text would include the request URL, which carries the
+		// one-time option token, so it is deliberately not wrapped.
 		return nil, errors.New("captcha image request failed")
 	}
 	defer resp.Body.Close()

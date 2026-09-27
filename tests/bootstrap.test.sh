@@ -54,7 +54,20 @@ make_release_renew() {
 #!/usr/bin/env bash
 case "${1:-}" in
     version) printf '%s\n' 'acl-renew test' ;;
-    check) printf '%s\n' '[renew] test check' ;;
+    check) env > "${ACL_BASE_DIR:?}/data/renew-test.env"; printf '%s\n' '[renew] test check' ;;
+    *) exit 2 ;;
+esac
+EOF
+    chmod +x "$path"
+}
+
+make_failing_renew() {
+    local path="$1"
+    cat > "$path" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+    version) printf '%s\n' 'acl-renew test' ;;
+    check) printf '%s\n' '[renew] test failure'; exit 1 ;;
     *) exit 2 ;;
 esac
 EOF
@@ -233,6 +246,7 @@ MONITOR_ENABLED='0'
 AUTO_RENEW_ENABLED='1'
 ACL_USERNAME='person@example.com'
 ACL_PASSWORD='password'
+MONITOR_TOKEN='monitor-secret-must-not-leak'
 EOF
 (
     cd "$renew_dir"
@@ -256,9 +270,46 @@ fi
 kill -TERM "$renew_bootstrap_pid" 2>/dev/null || true
 wait "$renew_bootstrap_pid" 2>/dev/null || true
 assert_contains '^\[renew\] Check finished with exit code 0$' "$renew_dir/logs/renew.log"
+assert_contains '^ACL_USERNAME=person@example.com$' "$renew_dir/data/renew-test.env"
+assert_contains '^ACL_PASSWORD=password$' "$renew_dir/data/renew-test.env"
+if grep -Eq 'monitor-secret-must-not-leak|^MONITOR_TOKEN=' "$renew_dir/data/renew-test.env"; then
+    printf 'monitor credentials leaked into the renewal helper environment\n' >&2
+    exit 1
+fi
+
+# A failed renewal check is retried soon, with a growing delay, instead of
+# waiting for the next daily check.
+renew_retry_dir="$TEST_DIR/renew-retry-server"
+mkdir -p "$renew_retry_dir/bin"
+cp "$PROJECT_DIR/bootstrap.sh" "$renew_retry_dir/bootstrap.sh"
+cp "$release_dir/launcher.sh" "$renew_retry_dir/launcher.sh"
+make_failing_renew "$renew_retry_dir/bin/acl-renew"
+cp "$renew_dir/config.env" "$renew_retry_dir/config.env"
+(
+    cd "$renew_retry_dir"
+    exec env \
+        ACL_RENEW_CHECK_INTERVAL=3600 \
+        ACL_RENEW_JITTER_MAX=0 \
+        ACL_RENEW_RETRY_INTERVAL=1 \
+        ACL_LAUNCHER_READY_TIMEOUT=10 \
+        ACL_LAUNCHER_READY_STABLE_SECONDS=1 \
+        bash bootstrap.sh --AUTO_UPDATE=disable </dev/null >output.log 2>&1
+) &
+renew_retry_pid=$!
+if ! wait_for_pattern 'Renewal check failed with exit code 1; retrying in 2s' "$renew_retry_dir/output.log"; then
+    printf 'bootstrap did not retry a failed renewal check with backoff\n' >&2
+    cat "$renew_retry_dir/output.log" >&2 || true
+    kill -TERM "$renew_retry_pid" 2>/dev/null || true
+    wait "$renew_retry_pid" 2>/dev/null || true
+    exit 1
+fi
+kill -TERM "$renew_retry_pid" 2>/dev/null || true
+wait "$renew_retry_pid" 2>/dev/null || true
+assert_contains 'Renewal check failed with exit code 1; retrying in 1s' "$renew_retry_dir/output.log"
 
 # The hidden prerelease channel resolves the newest published prerelease and
-# preserves that channel after bootstrap replaces itself.
+# preserves that channel after bootstrap replaces itself. The selected entry
+# is written on one line, as a minified API response would be.
 prerelease_tag='v0.5.1-pre1'
 prerelease_root="$TEST_DIR/prerelease-downloads"
 prerelease_release="$prerelease_root/$prerelease_tag"
@@ -278,11 +329,7 @@ cat > "$TEST_DIR/releases.json" <<EOF
     "draft": true,
     "prerelease": true
   },
-  {
-    "tag_name": "$prerelease_tag",
-    "draft": false,
-    "prerelease": true
-  },
+  {"tag_name":"$prerelease_tag","author":{"login":"someone"},"draft":false,"prerelease":true,"assets":[{"name":"SHA256SUMS"}]},
   {
     "tag_name": "v0.5.0",
     "draft": false,
@@ -439,5 +486,174 @@ if cmp -s "$rollback_release/launcher.sh" "$rollback_dir/launcher.sh"; then
     printf 'failed launcher remained installed after rollback\n' >&2
     exit 1
 fi
+
+# The release that was rolled back is not installed again at the next check.
+(
+    cd "$rollback_dir"
+    exec env \
+        ACL_UPDATE_BASE_URL="$rollback_url" \
+        ACL_UPDATE_CHECK_INTERVAL=0 \
+        ACL_UPDATE_JITTER_MAX=0 \
+        ACL_LAUNCHER_READY_TIMEOUT=3 \
+        ACL_LAUNCHER_READY_STABLE_SECONDS=1 \
+        bash bootstrap.sh --AUTO_UPDATE=enable </dev/null >rejected.log 2>&1
+) &
+rejected_pid=$!
+if ! wait_for_pattern 'Skipping the stable release that was rolled back' "$rollback_dir/rejected.log" || \
+   ! wait_for_pattern '^change this part$' "$rollback_dir/rejected.log"; then
+    printf 'bootstrap installed a release that had already been rolled back\n' >&2
+    cat "$rollback_dir/rejected.log" >&2 || true
+    kill -TERM "$rejected_pid" 2>/dev/null || true
+    wait "$rejected_pid" 2>/dev/null || true
+    exit 1
+fi
+kill -TERM "$rejected_pid" 2>/dev/null || true
+wait "$rejected_pid" 2>/dev/null || true
+
+# An updated bootstrap that crashes before committing the update is rolled
+# back on the next start, even though the crash happened in the new code.
+crash_release="$TEST_DIR/crash-release"
+crash_dir="$TEST_DIR/crash-server"
+mkdir -p "$crash_release" "$crash_dir"
+sed 's/^find_latest_prerelease_tag() {$/exit 42\n&/' "$PROJECT_DIR/bootstrap.sh" > "$crash_release/bootstrap.sh"
+grep -q '^exit 42$' "$crash_release/bootstrap.sh" || { printf 'could not build the crashing bootstrap fixture\n' >&2; exit 1; }
+make_release_launcher "$crash_release/launcher.sh"
+make_release_renew "$crash_release/acl-renew-linux-amd64"
+(
+    cd "$crash_release"
+    sha256sum bootstrap.sh launcher.sh acl-renew-linux-amd64 > SHA256SUMS
+)
+cp "$PROJECT_DIR/bootstrap.sh" "$crash_dir/bootstrap.sh"
+make_release_launcher "$crash_dir/launcher.sh"
+cat > "$crash_dir/config.env" <<'EOF'
+CONFIG_SCHEMA_VERSION='2'
+MIHOMO_ENABLED='0'
+MONITOR_ENABLED='1'
+EOF
+crash_env=(
+    ACL_UPDATE_BASE_URL="$(file_url "$crash_release")"
+    ACL_UPDATE_CHECK_INTERVAL=0
+    ACL_UPDATE_JITTER_MAX=0
+    ACL_LAUNCHER_READY_TIMEOUT=10
+    ACL_LAUNCHER_READY_STABLE_SECONDS=1
+)
+if (cd "$crash_dir" && env "${crash_env[@]}" bash bootstrap.sh --AUTO_UPDATE=enable </dev/null >first.log 2>&1); then
+    printf 'the crashing bootstrap fixture did not crash\n' >&2
+    exit 1
+fi
+assert_contains 'Update verified; switching launcher under supervision' "$crash_dir/first.log"
+(
+    cd "$crash_dir"
+    exec env "${crash_env[@]}" bash bootstrap.sh --AUTO_UPDATE=enable </dev/null >second.log 2>&1
+) &
+crash_pid=$!
+if ! wait_for_pattern 'stopped unexpectedly before the update was committed' "$crash_dir/second.log" || \
+   ! wait_for_pattern '^change this part$' "$crash_dir/second.log"; then
+    printf 'bootstrap did not recover from an update that crashed during startup\n' >&2
+    cat "$crash_dir/second.log" >&2 || true
+    kill -TERM "$crash_pid" 2>/dev/null || true
+    wait "$crash_pid" 2>/dev/null || true
+    exit 1
+fi
+kill -TERM "$crash_pid" 2>/dev/null || true
+wait "$crash_pid" 2>/dev/null || true
+cmp -s "$PROJECT_DIR/bootstrap.sh" "$crash_dir/bootstrap.sh" || { printf 'the previous bootstrap was not restored\n' >&2; exit 1; }
+[[ -s "$crash_dir/data/bootstrap/rejected-update" ]] || { printf 'the crashed release was not recorded\n' >&2; exit 1; }
+
+# A process killed between the individual file replacements and the final
+# activation marker must not commit a mixed-version installation.
+partial_dir="$TEST_DIR/partial-switch-server"
+mkdir -p "$partial_dir/data/bootstrap/backups/update-partial" "$partial_dir/bin"
+cp "$PROJECT_DIR/bootstrap.sh" "$partial_dir/bootstrap.sh"
+make_release_launcher "$partial_dir/launcher.sh"
+make_release_renew "$partial_dir/bin/acl-renew"
+cp "$crash_dir/config.env" "$partial_dir/config.env"
+partial_backup="$partial_dir/data/bootstrap/backups/update-partial"
+cp "$partial_dir/launcher.sh" "$partial_dir/launcher.previous"
+cp "$partial_dir/bootstrap.sh" "$partial_backup/bootstrap.sh"
+cp "$partial_dir/launcher.previous" "$partial_backup/launcher.sh"
+cp "$partial_dir/bin/acl-renew" "$partial_backup/acl-renew-linux-amd64"
+cp "$partial_dir/config.env" "$partial_backup/config.snapshot"
+printf 'config.env\n' > "$partial_backup/config.name"
+printf '1\n' > "$partial_backup/renew.existed"
+printf 'partial-update-id\n' > "$partial_backup/update.id"
+printf '2\n' > "$partial_backup/transaction.version"
+printf 'update-partial\n' > "$partial_dir/data/bootstrap/pending-update"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 99' > "$partial_dir/launcher.sh"
+chmod +x "$partial_dir/launcher.sh"
+(
+    cd "$partial_dir"
+    exec env ACL_LAUNCHER_READY_TIMEOUT=10 ACL_LAUNCHER_READY_STABLE_SECONDS=1 \
+        bash bootstrap.sh --AUTO_UPDATE=disable </dev/null >output.log 2>&1
+) &
+partial_pid=$!
+if ! wait_for_pattern 'interrupted while switching files' "$partial_dir/output.log" || \
+   ! wait_for_pattern '^change this part$' "$partial_dir/output.log"; then
+    printf 'bootstrap did not roll back an interrupted multi-file switch\n' >&2
+    cat "$partial_dir/output.log" >&2 || true
+    kill -TERM "$partial_pid" 2>/dev/null || true
+    wait "$partial_pid" 2>/dev/null || true
+    exit 1
+fi
+kill -TERM "$partial_pid" 2>/dev/null || true
+wait "$partial_pid" 2>/dev/null || true
+cmp -s "$partial_dir/launcher.previous" "$partial_dir/launcher.sh" || {
+    printf 'interrupted switch did not restore the previous launcher\n' >&2
+    exit 1
+}
+
+# Stopping the container while an update is being verified leaves the failed
+# verification marker in place. This covers ACLClouds terminating a container
+# that does not become ready before the platform startup deadline.
+graceful_dir="$TEST_DIR/graceful-server"
+mkdir -p "$graceful_dir"
+cp "$PROJECT_DIR/bootstrap.sh" "$graceful_dir/bootstrap.sh"
+make_release_launcher "$graceful_dir/launcher.sh"
+cp "$crash_dir/config.env" "$graceful_dir/config.env"
+mkdir -p "$graceful_dir/data/bootstrap/backups/update-test"
+cp "$graceful_dir/bootstrap.sh" "$graceful_dir/launcher.sh" "$graceful_dir/data/bootstrap/backups/update-test/"
+cp "$graceful_dir/config.env" "$graceful_dir/data/bootstrap/backups/update-test/config.snapshot"
+printf 'config.env\n' > "$graceful_dir/data/bootstrap/backups/update-test/config.name"
+printf '0\n' > "$graceful_dir/data/bootstrap/backups/update-test/renew.existed"
+printf 'update-test\n' > "$graceful_dir/data/bootstrap/pending-update"
+(
+    cd "$graceful_dir"
+    exec env ACL_LAUNCHER_READY_TIMEOUT=10 ACL_LAUNCHER_READY_STABLE_SECONDS=30 \
+        bash bootstrap.sh --AUTO_UPDATE=disable </dev/null >output.log 2>&1
+) &
+graceful_pid=$!
+if ! wait_for_pattern '^change this part$' "$graceful_dir/output.log"; then
+    printf 'the pending update was not verified\n' >&2
+    cat "$graceful_dir/output.log" >&2 || true
+    kill -TERM "$graceful_pid" 2>/dev/null || true
+    wait "$graceful_pid" 2>/dev/null || true
+    exit 1
+fi
+kill -TERM "$graceful_pid" 2>/dev/null || true
+wait "$graceful_pid" 2>/dev/null || true
+[[ -f "$graceful_dir/data/bootstrap/pending-update" && -f "$graceful_dir/data/bootstrap/pending-update.started" ]] || {
+    printf 'shutdown discarded the pending update failure marker\n' >&2
+    exit 1
+}
+(
+    cd "$graceful_dir"
+    exec env ACL_LAUNCHER_READY_TIMEOUT=10 ACL_LAUNCHER_READY_STABLE_SECONDS=1 \
+        bash bootstrap.sh --AUTO_UPDATE=disable </dev/null >restart.log 2>&1
+) &
+graceful_restart_pid=$!
+if ! wait_for_pattern 'stopped unexpectedly before the update was committed' "$graceful_dir/restart.log" || \
+   ! wait_for_pattern '^change this part$' "$graceful_dir/restart.log"; then
+    printf 'bootstrap did not roll back an update interrupted by shutdown\n' >&2
+    cat "$graceful_dir/restart.log" >&2 || true
+    kill -TERM "$graceful_restart_pid" 2>/dev/null || true
+    wait "$graceful_restart_pid" 2>/dev/null || true
+    exit 1
+fi
+kill -TERM "$graceful_restart_pid" 2>/dev/null || true
+wait "$graceful_restart_pid" 2>/dev/null || true
+[[ ! -e "$graceful_dir/data/bootstrap/pending-update" ]] || {
+    printf 'rollback did not close the interrupted update transaction\n' >&2
+    exit 1
+}
 
 printf 'bootstrap tests passed\n'

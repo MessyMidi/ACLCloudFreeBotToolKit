@@ -141,6 +141,11 @@ describe('generateEnv', () => {
     expect(output).toContain("TELEGRAM_CHAT_ID='123456789'");
     expect(generateStartupCommand('https://tool.example/bootstrap.sh', true)).not.toContain(renewal.password);
   });
+
+  it('writes the Console language, defaulting to Chinese', () => {
+    expect(generateEnv(monitor, proxy)).toContain("CONSOLE_LANG='zh'");
+    expect(generateEnv(monitor, proxy, undefined, { consoleLanguage: 'en' })).toContain("CONSOLE_LANG='en'");
+  });
 });
 
 describe('parseStoredState', () => {
@@ -181,7 +186,30 @@ describe('parseStoredState', () => {
     expect(state?.rememberRenewalSecrets).toBe(false);
   });
 
-  it('persists renewal credentials only after explicit opt-in', () => {
+  it('keeps the monitor command in every snapshot, with or without the renewal opt-in', () => {
+    const snapshot = {
+      version: 3,
+      monitorEnabled: true,
+      monitorType: 'auto',
+      monitorCommand: 'install -e https://lite.example.com -t secret',
+      proxyEnabled: false,
+      proxy,
+      autoUpdate: true,
+      renewalEnabled: true,
+      renewal
+    };
+    const remembered = parseStoredState(JSON.stringify({ ...snapshot, rememberRenewalSecrets: true }));
+    expect(remembered?.rememberRenewalSecrets).toBe(true);
+    expect(remembered?.monitorCommand).toContain('secret');
+    expect(remembered?.renewal.password).toBe(renewal.password);
+
+    const forgotten = parseStoredState(JSON.stringify({ ...snapshot, rememberRenewalSecrets: false }));
+    expect(forgotten?.rememberRenewalSecrets).toBe(false);
+    expect(forgotten?.renewal.password).toBe('');
+    expect(forgotten?.monitorCommand).toContain('secret');
+  });
+
+  it('persists renewal secrets only after explicit opt-in', () => {
     expect(renewalForStorage(renewal, false)).toEqual({
       ...renewal,
       username: '',
@@ -190,20 +218,8 @@ describe('parseStoredState', () => {
       telegramChatId: ''
     });
     expect(renewalForStorage(renewal, true)).toEqual(renewal);
-
-    const state = parseStoredState(JSON.stringify({
-      version: 3,
-      monitorEnabled: false,
-      monitorType: 'auto',
-      monitorCommand: '',
-      proxyEnabled: false,
-      proxy,
-      autoUpdate: true,
-      renewalEnabled: true,
-      rememberRenewalSecrets: true,
-      renewal
-    }));
-    expect(state?.renewal.password).toBe(renewal.password);
+    // The Service ID is not a credential and stays saved either way.
+    expect(renewalForStorage(renewal, false).serverId).toBe(renewal.serverId);
   });
 
   it('accepts CF Server Monitor as a locally stored monitor selection', () => {
@@ -216,15 +232,17 @@ describe('parseStoredState', () => {
       proxy,
       autoUpdate: true,
       renewalEnabled: false,
-      rememberRenewalSecrets: false,
+      rememberRenewalSecrets: true,
       renewal
     }));
     expect(state?.monitorType).toBe('cfsm');
+    expect(state?.monitorCommand).toContain('-secret=y');
   });
 
   it('ignores malformed or unknown local snapshots', () => {
     expect(parseStoredState('{broken')).toBeUndefined();
     expect(parseStoredState(JSON.stringify({ version: 3 }))).toBeUndefined();
+    expect(parseStoredState(JSON.stringify({ version: 4 }))).toBeUndefined();
   });
 });
 
@@ -264,5 +282,10 @@ describe('validateProxy', () => {
     const result = validateProxy({ ...proxy, destination: 'example.com', remark: 'bad remark;rm' });
     expect(result.errors.destination).toBeTruthy();
     expect(result.errors.remark).toBeTruthy();
+  });
+
+  it('accepts bracketed IPv6 destinations and rejects out-of-range ports', () => {
+    expect(validateProxy({ ...proxy, destination: '[2001:db8::1]:443' }).valid).toBe(true);
+    expect(validateProxy({ ...proxy, destination: 'example.com:70000' }).errors.destination).toBeTruthy();
   });
 });

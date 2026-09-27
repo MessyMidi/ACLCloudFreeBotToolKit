@@ -8,6 +8,8 @@
  */
 
 import { CLIENT_FINGERPRINTS, TESTED_VERSIONS } from './constants';
+import { t } from './i18n';
+import type { Locale } from './i18n';
 import type { MonitorConfig, ProxyConfig, RenewalConfig, RenewalValidationResult, ValidationResult } from './types';
 
 function hasControlCharacters(value: string): boolean {
@@ -18,54 +20,62 @@ function hasControlCharacters(value: string): boolean {
 }
 
 export function shellQuote(value: string): string {
-  if (hasControlCharacters(value)) throw new Error('配置值不能包含换行或控制字符');
+  if (hasControlCharacters(value)) throw new Error(t('validate.controlCharacters'));
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 export function validateProxy(config: ProxyConfig): ValidationResult {
   const errors: ValidationResult['errors'] = {};
-  if (!config.sni.trim()) errors.sni = '请填写 REALITY SNI';
-  else if (!/^[A-Za-z0-9._-]+$/.test(config.sni)) errors.sni = 'SNI 只能包含域名常用字符';
+  if (!config.sni.trim()) errors.sni = t('validate.sniRequired');
+  else if (!/^[A-Za-z0-9._-]+$/.test(config.sni)) errors.sni = t('validate.sniInvalid');
 
-  if (!config.destination.trim()) errors.destination = '请填写 REALITY Destination';
+  if (!config.destination.trim()) errors.destination = t('validate.destinationRequired');
   else {
+    // Keep in sync with valid_destination in launcher.sh.
     const match = config.destination.match(/^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):([0-9]{1,5})$/);
     const port = match ? Number(match[1]) : 0;
-    if (!match || port < 1 || port > 65535) errors.destination = '请使用 host:port 格式，并填写有效端口';
+    if (!match || port < 1 || port > 65535) errors.destination = t('validate.destinationInvalid');
   }
 
   if (!CLIENT_FINGERPRINTS.some((fingerprint) => fingerprint === config.fingerprint)) {
-    errors.fingerprint = '请选择 Mihomo 与 VLESS 共同支持的 Fingerprint';
+    errors.fingerprint = t('validate.fingerprint');
   }
-  if (!config.remark.trim()) errors.remark = '请填写节点备注';
-  else if (!/^[A-Za-z0-9._-]+$/.test(config.remark)) errors.remark = '备注只支持字母、数字、点、下划线和连字符';
+  if (!config.remark.trim()) errors.remark = t('validate.remarkRequired');
+  else if (!/^[A-Za-z0-9._-]+$/.test(config.remark)) errors.remark = t('validate.remarkInvalid');
   return { errors, valid: Object.keys(errors).length === 0 };
 }
 
 export function validateRenewal(config: RenewalConfig): RenewalValidationResult {
   const errors: RenewalValidationResult['errors'] = {};
-  if (!config.username.trim()) errors.username = '请填写 ACLClouds 登录邮箱或用户名';
-  else if (hasControlCharacters(config.username)) errors.username = '账号不能包含换行或控制字符';
-  if (!config.password) errors.password = '请填写 ACLClouds 登录密码';
-  else if (hasControlCharacters(config.password)) errors.password = '密码不能包含换行或控制字符';
-  if (config.serverId && !/^[A-Za-z0-9-]+$/.test(config.serverId)) errors.serverId = 'Service ID 只支持字母、数字和连字符';
+  if (!config.username.trim()) errors.username = t('validate.usernameRequired');
+  else if (hasControlCharacters(config.username)) errors.username = t('validate.usernameInvalid');
+  if (!config.password) errors.password = t('validate.passwordRequired');
+  else if (hasControlCharacters(config.password)) errors.password = t('validate.passwordInvalid');
+  if (config.serverId && !/^[A-Za-z0-9-]+$/.test(config.serverId)) errors.serverId = t('validate.serverId');
   const telegramBotToken = config.telegramBotToken.trim();
   const telegramChatId = config.telegramChatId.trim();
-  if (telegramBotToken && !/^\d+:[A-Za-z0-9_-]+$/.test(telegramBotToken)) errors.telegramBotToken = 'Telegram Bot Token 格式异常';
-  if (telegramChatId && !/^-?\d+$/.test(telegramChatId)) errors.telegramChatId = 'Telegram Chat ID 应为数字';
-  if (telegramBotToken && !telegramChatId) errors.telegramChatId = '填写 Bot Token 后还需要 Chat ID';
-  if (!telegramBotToken && telegramChatId) errors.telegramBotToken = '填写 Chat ID 后还需要 Bot Token';
+  if (telegramBotToken && !/^\d+:[A-Za-z0-9_-]+$/.test(telegramBotToken)) errors.telegramBotToken = t('validate.botToken');
+  if (telegramChatId && !/^-?\d+$/.test(telegramChatId)) errors.telegramChatId = t('validate.chatId');
+  if (telegramBotToken && !telegramChatId) errors.telegramChatId = t('validate.chatIdMissing');
+  if (!telegramBotToken && telegramChatId) errors.telegramBotToken = t('validate.botTokenMissing');
   return { errors, valid: Object.keys(errors).length === 0 };
 }
 
-export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig, renewal?: RenewalConfig): string {
-  if (!monitor && !proxy && !renewal) throw new Error('至少启用 Monitor、Mihomo 或自动延期中的一个');
+export interface EnvOptions {
+  /** Language of the launcher's Console menu. */
+  consoleLanguage?: Locale;
+}
+
+export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig, renewal?: RenewalConfig, options: EnvOptions = {}): string {
+  if (!monitor && !proxy && !renewal) throw new Error(t('validate.noModule'));
 
   const lines = [
     '# ACLClouds Free Bot · generated locally in your browser',
     '# Do not set SERVER_IP / SERVER_PORT; ACLClouds injects them.',
     '',
     `CONFIG_SCHEMA_VERSION=${shellQuote('2')}`,
+    '# Console menu language: zh or en',
+    `CONSOLE_LANG=${shellQuote(options.consoleLanguage ?? 'zh')}`,
     '',
     '# ---------------- ACLClouds automatic renewal ----------------',
     `AUTO_RENEW_ENABLED=${shellQuote(renewal ? '1' : '0')}`

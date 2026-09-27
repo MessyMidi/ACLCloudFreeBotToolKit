@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -221,12 +222,59 @@ func (s *session) saveAuthState(path string) error {
 	return nil
 }
 
+// statusPageExpired is Laravel's "Page Expired" response to an expired
+// session or CSRF token.
+const statusPageExpired = 419
+
+// sessionExpired reports whether ACLClouds rejected a request because the
+// login or the session's CSRF token is no longer valid.
+func sessionExpired(status int) bool {
+	return status == http.StatusUnauthorized || status == statusPageExpired
+}
+
+// captchaErrorFields are the JSON fields that describe why a request failed.
+var captchaErrorFields = []string{"error", "errors", "code", "message", "detail", "reason"}
+
 func captchaRequired(result httpResult) bool {
 	if result.Status != http.StatusForbidden && result.Status != http.StatusUnprocessableEntity {
 		return false
 	}
-	return strings.Contains(strings.ToLower(string(result.Body)), "captcha_required") ||
-		strings.Contains(strings.ToLower(string(result.Body)), "captcha")
+	var data map[string]any
+	if json.Unmarshal(result.Body, &data) != nil {
+		// Not a JSON object (an HTML error page, for example): fall back to a
+		// plain text match.
+		return strings.Contains(strings.ToLower(string(result.Body)), "captcha")
+	}
+	for key, value := range data {
+		lowerKey := strings.ToLower(key)
+		if slices.Contains(captchaErrorFields, lowerKey) && mentionsCaptcha(value) {
+			return true
+		}
+		// A flag such as {"captcha_required": true}. Other CAPTCHA fields, a
+		// site key for example, only describe the widget and demand nothing.
+		if flag, ok := value.(bool); ok && flag && strings.Contains(lowerKey, "captcha") {
+			return true
+		}
+	}
+	return false
+}
+
+// mentionsCaptcha reports whether any string or object key within value
+// mentions a CAPTCHA.
+func mentionsCaptcha(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return strings.Contains(strings.ToLower(typed), "captcha")
+	case []any:
+		return slices.ContainsFunc(typed, mentionsCaptcha)
+	case map[string]any:
+		for key, item := range typed {
+			if strings.Contains(strings.ToLower(key), "captcha") || mentionsCaptcha(item) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func responseMessage(body []byte) string {

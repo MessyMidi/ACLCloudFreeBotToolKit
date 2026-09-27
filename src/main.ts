@@ -10,10 +10,15 @@
 import './styles.css';
 import { DEFAULT_PROXY, MONITOR_LABELS, TESTED_VERSIONS } from './constants';
 import { generateEnv, generateStartupCommand, validateProxy, validateRenewal } from './generator';
+import { detectLocale, getLocale, isMessageKey, setLocale, t } from './i18n';
+import type { Locale, MessageKey, MessageParams } from './i18n';
 import { maskToken, parseMonitorCommand } from './monitor-parser';
 import { FORM_STORAGE_KEY, parseStoredState, renewalForStorage } from './storage';
 import type { StoredFormState } from './storage';
 import type { MonitorConfig, MonitorSelection, ProxyConfig, RenewalConfig } from './types';
+
+const LOCALE_STORAGE_KEY = 'aclclouds:locale';
+const THEME_STORAGE_KEY = 'aclclouds:theme';
 
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const form = byId<HTMLFormElement>('generator-form');
@@ -33,6 +38,34 @@ let tokenVisible = false;
 let toastTimer = 0;
 let saveTimer = 0;
 
+interface StatusMessage {
+  key: MessageKey;
+  params?: MessageParams;
+}
+
+// Status lines are kept as message keys so they can be re-rendered when the
+// language changes.
+let outputStatus: StatusMessage = { key: 'output.waiting' };
+let storageStatus: StatusMessage = { key: 'storage.initial' };
+
+function setOutputStatus(key: MessageKey, params?: MessageParams): void {
+  outputStatus = { key, params };
+  byId('output-status').textContent = t(key, params);
+}
+
+function setStorageStatus(key: MessageKey): void {
+  storageStatus = { key };
+  byId('storage-status').textContent = t(key);
+}
+
+function readStorage(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function writeStorage(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* Preferences are optional. */ }
+}
+
 function selectedMonitorType(): MonitorSelection {
   return (form.elements.namedItem('monitorType') as RadioNodeList).value as MonitorSelection;
 }
@@ -45,12 +78,15 @@ function showErrors(errors: string[]): void {
   }));
 }
 
+function secretLabel(config: MonitorConfig): string {
+  return config.type === 'cfsm' ? 'Secret' : 'Token';
+}
+
 function updateTokenPreview(): void {
   if (!parsedMonitor) return;
   byId('detected-token').textContent = tokenVisible ? parsedMonitor.token : maskToken(parsedMonitor.token);
   revealButton.classList.toggle('active', tokenVisible);
-  const secretLabel = parsedMonitor.type === 'cfsm' ? 'Secret' : 'Token';
-  revealButton.setAttribute('aria-label', `${tokenVisible ? '隐藏' : '显示'} ${secretLabel}`);
+  revealButton.setAttribute('aria-label', t(tokenVisible ? 'monitor.hide' : 'monitor.show', { label: secretLabel(parsedMonitor) }));
 }
 
 function parseCommand(): void {
@@ -62,15 +98,18 @@ function parseCommand(): void {
   }
   const result = parseMonitorCommand(commandInput.value, selectedMonitorType());
   showErrors(result.errors);
+  const previousToken = parsedMonitor?.token;
   parsedMonitor = result.config;
   parseResult.hidden = !parsedMonitor;
   if (!parsedMonitor) return;
 
-  tokenVisible = false;
+  // Re-rendering the same command, after a language switch for example,
+  // keeps a revealed token visible.
+  if (parsedMonitor.token !== previousToken) tokenVisible = false;
   const isCfsm = parsedMonitor.type === 'cfsm';
-  byId('detected-type').textContent = `已识别 ${MONITOR_LABELS[parsedMonitor.type]}`;
+  byId('detected-type').textContent = t('monitor.detected', { name: MONITOR_LABELS[parsedMonitor.type] });
   byId('label-endpoint').textContent = isCfsm ? 'URL' : 'Endpoint';
-  byId('label-token').textContent = isCfsm ? 'Secret' : 'Token';
+  byId('label-token').textContent = secretLabel(parsedMonitor);
   const idRow = byId<HTMLElement>('row-agent-id');
   const optionsRow = byId<HTMLElement>('row-cfsm-options');
   idRow.hidden = !isCfsm;
@@ -78,21 +117,22 @@ function parseCommand(): void {
   if (parsedMonitor.type === 'cfsm') {
     byId('detected-agent-id').textContent = parsedMonitor.agentId;
     byId('detected-cfsm-options').textContent = [
-      `采样 ${parsedMonitor.options.collectInterval}s`,
-      `上报 ${parsedMonitor.options.reportInterval}s`,
+      t('monitor.sample', { seconds: parsedMonitor.options.collectInterval }),
+      t('monitor.report', { seconds: parsedMonitor.options.reportInterval }),
       parsedMonitor.options.connectionMode.toUpperCase(),
       `Ping ${parsedMonitor.options.pingMode.toUpperCase()}`
     ].join(' · ');
   }
   byId('detected-endpoint').textContent = parsedMonitor.endpoint;
-  byId('parse-warning').textContent = result.warnings.join('；');
+  byId('parse-warning').textContent = result.warnings.join(t('list.separator'));
   remoteControl.checked = parsedMonitor.remoteControl;
   remoteRow.hidden = isCfsm;
   if (!isCfsm) {
-    byId('remote-title').textContent = `远程控制：${parsedMonitor.remoteControl ? '开启' : '关闭'}`;
-    byId('remote-detail').textContent = parsedMonitor.type === 'lite'
-      ? (parsedMonitor.remoteControl ? '命令包含 --enable-remote-control' : '命令未开启，或显式设置为 false')
-      : (parsedMonitor.remoteControl ? '命令未包含 --disable-web-ssh' : '命令包含 --disable-web-ssh');
+    byId('remote-title').textContent = t(parsedMonitor.remoteControl ? 'monitor.remoteOn' : 'monitor.remoteOff');
+    const detailKey: MessageKey = parsedMonitor.type === 'lite'
+      ? (parsedMonitor.remoteControl ? 'monitor.liteRemoteOn' : 'monitor.liteRemoteOff')
+      : (parsedMonitor.remoteControl ? 'monitor.komariRemoteOn' : 'monitor.komariRemoteOff');
+    byId('remote-detail').textContent = t(detailKey);
   }
   updateTokenPreview();
 }
@@ -144,18 +184,18 @@ function bootstrapUrl(): string {
   return 'https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/latest/download/bootstrap.sh';
 }
 
-function clearGeneratedOutput(status = '配置已更改，请重新生成'): void {
+function clearGeneratedOutput(status: MessageKey = 'output.changed'): void {
   const generated = byId('generated-output');
   if (generated.hidden) return;
   generated.hidden = true;
   byId('empty-output').hidden = false;
   byId('env-output').textContent = '';
   byId('startup-output').textContent = '';
-  byId('output-status').textContent = status;
+  setOutputStatus(status);
   byId('output-panel').classList.remove('ready');
 }
 
-function generate(): void {
+function generate(scrollToResult = true): void {
   parseCommand();
   const monitor = monitorEnabled.checked ? parsedMonitor : undefined;
   const proxy = proxyEnabled.checked ? proxyConfig() : undefined;
@@ -166,26 +206,26 @@ function generate(): void {
   renderRenewalErrors(renewalValidation.errors);
   const selectionError = byId('selection-error');
   const allModulesDisabled = !monitorEnabled.checked && !proxyEnabled.checked && !renewalEnabled.checked;
-  selectionError.textContent = allModulesDisabled ? '请至少启用 Monitor、代理或自动延期中的一个' : '';
+  selectionError.textContent = allModulesDisabled ? t('generate.noModule') : '';
   if (allModulesDisabled || (monitorEnabled.checked && !monitor) || !validation.valid || !renewalValidation.valid) {
-    clearGeneratedOutput('请修正标记的问题');
-    byId('output-status').textContent = '请修正标记的问题';
-    document.querySelector('.field-error:not(:empty)')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    clearGeneratedOutput('output.fix');
+    setOutputStatus('output.fix');
+    if (scrollToResult) document.querySelector('.field-error:not(:empty)')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
 
-  byId('env-output').textContent = generateEnv(monitor, proxy, renewal);
+  byId('env-output').textContent = generateEnv(monitor, proxy, renewal, { consoleLanguage: getLocale() });
   byId('startup-output').textContent = generateStartupCommand(bootstrapUrl(), autoUpdate.checked);
   byId('empty-output').hidden = true;
   byId('generated-output').hidden = false;
   const enabledServices = [
     monitor ? MONITOR_LABELS[monitor.type] : '',
     proxy ? 'VLESS + REALITY' : '',
-    renewal ? '自动延期' : ''
+    renewal ? t('output.renewalService') : ''
   ].filter(Boolean).join(' + ');
-  byId('output-status').textContent = `${enabledServices} · 配置已就绪`;
+  setOutputStatus('output.ready', { services: enabledServices });
   byId('output-panel').classList.add('ready');
-  if (window.innerWidth < 920) byId('output-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (scrollToResult && window.innerWidth < 920) byId('output-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function toast(message: string): void {
@@ -213,11 +253,13 @@ async function copyText(kind: 'env' | 'startup', button: HTMLButtonElement): Pro
     area.remove();
   }
   const label = button.querySelector('span')!;
-  const original = label.textContent;
-  label.textContent = '已复制';
+  label.textContent = t('output.copied');
   button.classList.add('copied');
-  toast(kind === 'env' ? 'config.env 已复制' : 'Startup Command 已复制');
-  window.setTimeout(() => { label.textContent = original; button.classList.remove('copied'); }, 1800);
+  toast(t(kind === 'env' ? 'output.envCopied' : 'output.startupCopied'));
+  window.setTimeout(() => {
+    label.textContent = t(kind === 'env' ? 'output.copyEnv' : 'output.copyStartup');
+    button.classList.remove('copied');
+  }, 1800);
 }
 
 function renderVersions(): void {
@@ -259,15 +301,61 @@ function applyTheme(dark: boolean): void {
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#15221c' : '#f6f8fa');
 }
 
-function readTheme(): string | null {
-  try { return localStorage.getItem('aclclouds:theme'); } catch { return null; }
+/** Renders a message, showing `backtick` spans as inline code. */
+function renderRichText(element: HTMLElement, text: string): void {
+  element.replaceChildren(...text.split('`').map((part, index) => {
+    if (index % 2 === 0) return document.createTextNode(part);
+    const code = document.createElement('code');
+    code.textContent = part;
+    return code;
+  }));
 }
 
-function saveTheme(dark: boolean): void {
-  try { localStorage.setItem('aclclouds:theme', dark ? 'dark' : 'light'); } catch { /* Theme persistence is optional. */ }
+function translateElements(attribute: string, apply: (element: HTMLElement, text: string) => void): void {
+  document.querySelectorAll<HTMLElement>(`[${attribute}]`).forEach((element) => {
+    const key = element.getAttribute(attribute) ?? '';
+    if (isMessageKey(key)) apply(element, t(key));
+  });
 }
 
-function currentStoredState(): StoredFormState {
+function renderLocale(): void {
+  const locale = getLocale();
+  document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+  document.title = t('meta.title');
+  document.querySelector('meta[name="description"]')?.setAttribute('content', t('meta.description'));
+  translateElements('data-i18n', (element, text) => { element.textContent = text; });
+  translateElements('data-i18n-rich', renderRichText);
+  translateElements('data-i18n-placeholder', (element, text) => element.setAttribute('placeholder', text));
+  translateElements('data-i18n-aria-label', (element, text) => element.setAttribute('aria-label', text));
+  translateElements('data-i18n-tooltip', (element, text) => element.setAttribute('data-tooltip', text));
+  byId('output-status').textContent = t(outputStatus.key, outputStatus.params);
+  byId('storage-status').textContent = t(storageStatus.key);
+}
+
+function switchLocale(locale: Locale): void {
+  setLocale(locale);
+  writeStorage(LOCALE_STORAGE_KEY, locale);
+  renderLocale();
+  // Messages built from user input are rebuilt in the new language.
+  if (monitorEnabled.checked && commandInput.value.trim()) parseCommand();
+  if (!byId('generated-output').hidden) {
+    // Any edit hides the output, so it still matches the form. It is rebuilt
+    // because the generated config also carries the Console language.
+    generate(false);
+  } else {
+    refreshErrorMessages();
+  }
+}
+
+/** Re-renders validation messages that are on screen in the current language. */
+function refreshErrorMessages(): void {
+  if (document.querySelector('[data-error-for]:not(:empty)')) renderProxyErrors(validateProxy(proxyConfig()).errors);
+  if (document.querySelector('[data-renew-error-for]:not(:empty)')) renderRenewalErrors(validateRenewal(renewalConfig()).errors);
+  const selectionError = byId('selection-error');
+  if (selectionError.textContent) selectionError.textContent = t('generate.noModule');
+}
+
+function currentFormState(): StoredFormState {
   const renewal = renewalConfig();
   return {
     version: 3,
@@ -285,12 +373,10 @@ function currentStoredState(): StoredFormState {
 
 function saveFormState(): void {
   try {
-    localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(currentStoredState()));
-    byId('storage-status').textContent = rememberRenewalSecrets.checked
-      ? '配置与续期凭证已保存在此浏览器'
-      : '配置已保存；续期密码和 Token 未保存';
+    localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(currentFormState()));
+    setStorageStatus(rememberRenewalSecrets.checked ? 'storage.saved' : 'storage.savedWithoutSecrets');
   } catch {
-    byId('storage-status').textContent = '浏览器拒绝了本地保存';
+    setStorageStatus('storage.blocked');
   }
 }
 
@@ -319,14 +405,19 @@ function applyStoredState(state: StoredFormState): void {
   byId<HTMLInputElement>('telegram-chat-id').value = state.renewal.telegramChatId;
 }
 
-function resetSavedState(): void {
-  try { localStorage.removeItem(FORM_STORAGE_KEY); } catch { /* The form can still be reset in memory. */ }
-  form.reset();
-  commandInput.value = '';
+function applyDefaultProxy(): void {
   Object.entries(DEFAULT_PROXY).forEach(([key, value]) => {
     const element = document.getElementById(key) as HTMLInputElement | HTMLSelectElement | null;
     if (element) element.value = value;
   });
+}
+
+function resetSavedState(): void {
+  try { localStorage.removeItem(FORM_STORAGE_KEY); } catch { /* The form can still be reset in memory. */ }
+  form.reset();
+  rememberRenewalSecrets.checked = false;
+  commandInput.value = '';
+  applyDefaultProxy();
   parsedMonitor = undefined;
   tokenVisible = false;
   parseResult.hidden = true;
@@ -336,9 +427,9 @@ function resetSavedState(): void {
   syncModuleState('monitor-section', 'monitor-fields', monitorEnabled);
   syncModuleState('proxy-section', 'proxy-fields', proxyEnabled);
   syncModuleState('renewal-section', 'renewal-fields', renewalEnabled);
-  clearGeneratedOutput('本地配置已清除');
-  byId('storage-status').textContent = '已清除；下一次修改会重新保存';
-  toast('本地配置已清除');
+  clearGeneratedOutput('output.cleared');
+  setStorageStatus('storage.cleared');
+  toast(t('output.cleared'));
 }
 
 commandInput.addEventListener('input', parseCommand);
@@ -354,29 +445,29 @@ form.addEventListener('submit', (event) => { event.preventDefault(); generate();
 document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => button.addEventListener('click', () => void copyText(button.dataset.copy as 'env' | 'startup', button)));
 byId('theme-toggle').addEventListener('click', () => {
   const dark = !document.body.classList.contains('dark');
-  saveTheme(dark);
+  writeStorage(THEME_STORAGE_KEY, dark ? 'dark' : 'light');
   applyTheme(dark);
 });
+byId('locale-toggle').addEventListener('click', () => switchLocale(getLocale() === 'zh' ? 'en' : 'zh'));
 byId('clear-storage').addEventListener('click', resetSavedState);
 
+const savedLocale = readStorage(LOCALE_STORAGE_KEY);
+const browserLanguages = navigator.languages.length > 0 ? navigator.languages : [navigator.language];
+setLocale(savedLocale === 'zh' || savedLocale === 'en' ? savedLocale : detectLocale(browserLanguages));
+renderLocale();
 renderVersions();
 let storedState: StoredFormState | undefined;
 try { storedState = parseStoredState(localStorage.getItem(FORM_STORAGE_KEY)); } catch { storedState = undefined; }
 if (storedState) {
   applyStoredState(storedState);
   saveFormState();
-  byId('storage-status').textContent = storedState.rememberRenewalSecrets
-    ? '已恢复配置与续期凭证'
-    : '已恢复配置；续期密码和 Token 未保存';
+  setStorageStatus(storedState.rememberRenewalSecrets ? 'storage.restored' : 'storage.restoredWithoutSecrets');
 } else {
-  Object.entries(DEFAULT_PROXY).forEach(([key, value]) => {
-    const element = document.getElementById(key) as HTMLInputElement | HTMLSelectElement | null;
-    if (element) element.value = value;
-  });
+  applyDefaultProxy();
 }
 syncModuleState('monitor-section', 'monitor-fields', monitorEnabled);
 syncModuleState('proxy-section', 'proxy-fields', proxyEnabled);
 syncModuleState('renewal-section', 'renewal-fields', renewalEnabled);
 if (commandInput.value.trim()) parseCommand();
-const savedTheme = readTheme();
+const savedTheme = readStorage(THEME_STORAGE_KEY);
 applyTheme(savedTheme ? savedTheme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches);

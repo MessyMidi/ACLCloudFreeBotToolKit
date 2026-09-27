@@ -48,6 +48,20 @@ jobs:
       - name: Check shell syntax
         run: bash -n bootstrap.sh launcher.sh tests/bootstrap.test.sh tests/launcher-modes.test.sh
 
+      - name: ShellCheck
+        run: shellcheck --severity=warning bootstrap.sh launcher.sh
+
+      - name: Check Go formatting
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [ -n "$unformatted" ]; then
+            printf 'Run gofmt on:\n%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Go vet
+        run: go vet ./...
+
       - name: Lint
         run: npm run lint
 

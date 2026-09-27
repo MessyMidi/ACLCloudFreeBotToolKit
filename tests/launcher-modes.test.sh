@@ -86,6 +86,17 @@ wait_for_output() {
     return 1
 }
 
+# Git for Windows ships a native curl that cannot open MSYS paths such as
+# /tmp/..., so file:// URLs are built from the Windows path there.
+file_url() {
+    local path="$1"
+    if command -v cygpath >/dev/null 2>&1; then
+        printf 'file:///%s\n' "$(cygpath -m "$path")"
+    else
+        printf 'file://%s\n' "$path"
+    fi
+}
+
 run_for_startup() {
     local dir="$1"
     shift
@@ -246,7 +257,7 @@ MONITOR_ENDPOINT='https://lite.example.com'
 MONITOR_TOKEN='test-token'
 MONITOR_REMOTE_CONTROL='false'
 MONITOR_VERSION='fixture-v1'
-MONITOR_URL='file://$monitor_update_dir/assets/lite-v1'
+MONITOR_URL='$(file_url "$monitor_update_dir/assets/lite-v1")'
 MONITOR_SHA256='$monitor_v1_sha'
 EOF
 run_for_startup "$monitor_update_dir" env
@@ -259,7 +270,7 @@ MONITOR_ENDPOINT='https://lite.example.com'
 MONITOR_TOKEN='test-token'
 MONITOR_REMOTE_CONTROL='false'
 MONITOR_VERSION='fixture-v2'
-MONITOR_URL='file://$monitor_update_dir/assets/lite-v2'
+MONITOR_URL='$(file_url "$monitor_update_dir/assets/lite-v2")'
 MONITOR_SHA256='$monitor_v2_sha'
 EOF
 run_for_startup "$monitor_update_dir" env
@@ -297,6 +308,40 @@ assert_contains 'Mihomo started' "$proxy_dir/output.log"
 assert_contains 'Monitor : DISABLED' "$proxy_dir/output.log"
 assert_contains 'vless://' "$proxy_dir/output.log"
 assert_contains '^change this part$' "$proxy_dir/output.log"
+# Proxy users are kept away from private networks unless explicitly allowed.
+assert_contains '^  - IP-CIDR,10.0.0.0/8,REJECT$' "$proxy_dir/config/mihomo.yaml"
+assert_contains '^  - IP-CIDR,169.254.0.0/16,REJECT$' "$proxy_dir/config/mihomo.yaml"
+assert_contains '^  - IP-CIDR6,fc00::/7,REJECT$' "$proxy_dir/config/mihomo.yaml"
+assert_after 'IP-CIDR,127.0.0.0/8,REJECT' '^  - MATCH,DIRECT$' "$proxy_dir/config/mihomo.yaml"
+
+# The launcher accepts every destination the Web generator accepts,
+# including bracketed IPv6 addresses, and private networks can be allowed.
+ipv6_dir="$(make_fixture proxy-ipv6)"
+cat > "$ipv6_dir/config.env" <<'EOF'
+MONITOR_ENABLED='0'
+REALITY_DEST='[2001:db8::1]:443'
+MIHOMO_BLOCK_PRIVATE_NETWORKS='0'
+EOF
+cp "$proxy_dir/bin/mihomo" "$ipv6_dir/bin/mihomo"
+run_for_startup "$ipv6_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
+assert_contains 'Mihomo started' "$ipv6_dir/output.log"
+assert_contains '^      dest: "\[2001:db8::1\]:443"$' "$ipv6_dir/config/mihomo.yaml"
+if grep -q 'REJECT' "$ipv6_dir/config/mihomo.yaml"; then
+    printf 'MIHOMO_BLOCK_PRIVATE_NETWORKS=0 still rejected private networks\n' >&2
+    exit 1
+fi
+
+bad_port_dir="$(make_fixture proxy-bad-port)"
+cat > "$bad_port_dir/config.env" <<'EOF'
+MONITOR_ENABLED='0'
+REALITY_DEST='www.example.com:70000'
+EOF
+cp "$proxy_dir/bin/mihomo" "$bad_port_dir/bin/mihomo"
+if (cd "$bad_port_dir" && env SERVER_IP=192.0.2.1 SERVER_PORT=443 bash launcher.sh </dev/null >output.log 2>&1); then
+    printf 'launcher accepted a destination port above 65535\n' >&2
+    exit 1
+fi
+assert_contains 'REALITY_DEST must be host:port' "$bad_port_dir/output.log"
 
 # Mihomo archive checksums and install metadata must trigger an atomic upgrade.
 mihomo_update_dir="$(make_fixture mihomo-update)"
@@ -311,9 +356,9 @@ cat > "$mihomo_update_dir/config.env" <<EOF
 MIHOMO_ENABLED='1'
 MONITOR_ENABLED='0'
 MIHOMO_VERSION='fixture-v1'
-MIHOMO_URL='file://$mihomo_update_dir/assets/mihomo-v1.gz'
+MIHOMO_URL='$(file_url "$mihomo_update_dir/assets/mihomo-v1.gz")'
 MIHOMO_SHA256='$mihomo_v1_sha'
-MIHOMO_FALLBACK_URL='file://$mihomo_update_dir/assets/mihomo-v1.gz'
+MIHOMO_FALLBACK_URL='$(file_url "$mihomo_update_dir/assets/mihomo-v1.gz")'
 MIHOMO_FALLBACK_SHA256='$mihomo_v1_sha'
 EOF
 run_for_startup "$mihomo_update_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
@@ -322,9 +367,9 @@ cat > "$mihomo_update_dir/config.env" <<EOF
 MIHOMO_ENABLED='1'
 MONITOR_ENABLED='0'
 MIHOMO_VERSION='fixture-v2'
-MIHOMO_URL='file://$mihomo_update_dir/assets/mihomo-v2.gz'
+MIHOMO_URL='$(file_url "$mihomo_update_dir/assets/mihomo-v2.gz")'
 MIHOMO_SHA256='$mihomo_v2_sha'
-MIHOMO_FALLBACK_URL='file://$mihomo_update_dir/assets/mihomo-v2.gz'
+MIHOMO_FALLBACK_URL='$(file_url "$mihomo_update_dir/assets/mihomo-v2.gz")'
 MIHOMO_FALLBACK_SHA256='$mihomo_v2_sha'
 EOF
 run_for_startup "$mihomo_update_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
@@ -448,5 +493,84 @@ if (cd "$disabled_dir" && bash launcher.sh >output.log 2>&1); then
     exit 1
 fi
 assert_contains 'At least one of Mihomo, Monitor, or automatic renewal must be enabled' "$disabled_dir/output.log"
+
+# Credentials from config.env must not reach an agent's environment; the
+# agent still receives its own token explicitly.
+secrets_dir="$(make_fixture secret-isolation)"
+cat > "$secrets_dir/bin/lite-agent" <<'EOF'
+#!/usr/bin/env bash
+env > "${0}.env"
+trap 'exit 0' TERM INT
+while true; do sleep 1; done
+EOF
+chmod +x "$secrets_dir/bin/lite-agent"
+cat > "$secrets_dir/config.env" <<EOF
+MIHOMO_ENABLED='0'
+MONITOR_ENABLED='1'
+MONITOR_TYPE='lite'
+MONITOR_ENDPOINT='https://lite.example.com'
+MONITOR_TOKEN='agent-token'
+MONITOR_REMOTE_CONTROL='false'
+MONITOR_SHA256='$(sha256sum "$secrets_dir/bin/lite-agent" | awk '{print $1}')'
+AUTO_RENEW_ENABLED='1'
+ACL_USERNAME='person@example.com'
+ACL_PASSWORD='acl-password'
+TELEGRAM_BOT_TOKEN='123:telegram-token'
+TELEGRAM_CHAT_ID='42'
+EOF
+run_for_startup "$secrets_dir" env
+assert_contains '^AGENT_TOKEN=agent-token$' "$secrets_dir/bin/lite-agent.env"
+if grep -Eq 'acl-password|telegram-token|person@example.com|^MONITOR_TOKEN=' "$secrets_dir/bin/lite-agent.env"; then
+    printf 'credentials leaked into the monitor agent environment\n' >&2
+    exit 1
+fi
+
+# Service logs are trimmed while running so they cannot fill the disk.
+log_trim_dir="$(make_fixture log-trim)"
+cat > "$log_trim_dir/bin/lite-agent" <<'EOF'
+#!/usr/bin/env bash
+for line in $(seq 1 200); do
+    printf 'agent log line %04d with padding to make the log grow quickly\n' "$line"
+done
+trap 'exit 0' TERM INT
+while true; do sleep 1; done
+EOF
+chmod +x "$log_trim_dir/bin/lite-agent"
+cat > "$log_trim_dir/config.env" <<EOF
+MIHOMO_ENABLED='0'
+MONITOR_ENABLED='1'
+MONITOR_TYPE='lite'
+MONITOR_ENDPOINT='https://lite.example.com'
+MONITOR_TOKEN='test-token'
+MONITOR_REMOTE_CONTROL='false'
+MONITOR_SHA256='$(sha256sum "$log_trim_dir/bin/lite-agent" | awk '{print $1}')'
+LOG_MAX_BYTES='2048'
+EOF
+(
+    cd "$log_trim_dir"
+    exec bash launcher.sh </dev/null >output.log 2>&1
+) &
+log_trim_pid=$!
+if ! wait_for_output 'older lines removed' "$log_trim_dir/logs/monitor.log"; then
+    printf 'oversized monitor log was not trimmed\n' >&2
+    kill -TERM "$log_trim_pid" 2>/dev/null || true
+    wait "$log_trim_pid" 2>/dev/null || true
+    exit 1
+fi
+kill -TERM "$log_trim_pid" 2>/dev/null || true
+wait "$log_trim_pid" 2>/dev/null || true
+(( $(wc -c < "$log_trim_dir/logs/monitor.log") <= 2048 )) || { printf 'trimmed log is still too large\n' >&2; exit 1; }
+assert_contains 'agent log line 0200' "$log_trim_dir/logs/monitor.log"
+
+# The Console menu follows CONSOLE_LANG.
+english_dir="$(make_fixture english-console)"
+cat > "$english_dir/config.env" <<'EOF'
+MIHOMO_ENABLED='0'
+MONITOR_ENABLED='0'
+AUTO_RENEW_ENABLED='1'
+CONSOLE_LANG='en'
+EOF
+run_until_output "$english_dir" 'Enter a number: ' env
+assert_contains '^\[7\] Renewal log (last 120 lines)$' "$english_dir/output.log"
 
 printf 'launcher mode tests passed\n'
