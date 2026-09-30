@@ -75,7 +75,7 @@ npm run build
 
 Build output is written to `dist/`. The shell lifecycle tests run with `bash tests/bootstrap.test.sh` and `bash tests/launcher-modes.test.sh`.
 
-The CAPTCHA reference data in `internal/renew/captcha_solver_ref.go` is generated from labelled sample images that are not part of the repository; see `internal/renew/genref`.
+The renewal helper uses the current Cap.js v2 `hashwx` proof-of-work flow. The official `@cap.js/wasm` v0.0.8 kernel is embedded in the Go binary and executed with wazero; it is never downloaded at runtime. See `THIRD_PARTY_NOTICES.md` for versions, provenance, and licensing.
 
 To publish a release, run `npm version <version>` (it also updates the version in the runtime scripts) and push the commit with its tag. The Release workflow tests and builds the tag and creates a draft Release; review it and publish it by hand.
 

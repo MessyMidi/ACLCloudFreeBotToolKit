@@ -42,6 +42,28 @@ https://github.com/huilang-me/cfsm-agent
 
 CF Server Monitor Agent is distributed under the MIT License. ACLCloudFreeBotToolKit may download and launch it as a separate executable; it is not relicensed under the ACLCloudFreeBotToolKit license.
 
+## wazero
+
+Project: tetratelabs/wazero
+
+Version: 1.12.0
+
+Repository:
+https://github.com/tetratelabs/wazero
+
+wazero is distributed under the Apache License 2.0 and is linked into the self-contained renewal helper.
+
+## Cap.js hashwx WebAssembly kernel
+
+Package: @cap.js/wasm
+
+Version: 0.0.8
+
+Repository:
+https://github.com/tiagozip/cap
+
+The official `browser/hashwx.wasm` artifact is embedded in the renewal helper. The package is distributed under the Apache License 2.0. Its SHA-256 is `b1a0dbb3ef444d3c7069e0a5e0a0273ffa4cf8fef62cbbe43761c02f7cd6aff5`.
+
 ## Disclaimer
 
 All third-party project names, trademarks, copyrights, and other rights remain the property of their respective owners.

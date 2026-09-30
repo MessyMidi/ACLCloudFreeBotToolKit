@@ -25,6 +25,7 @@ type Config struct {
 	TelegramBotToken string
 	TelegramChatID   string
 	TelegramAPIBase  string
+	captchaSolver    captchaSolverFunc
 }
 
 func LoadConfigFromEnv() (Config, error) {

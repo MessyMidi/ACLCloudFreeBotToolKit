@@ -75,7 +75,7 @@ npm run build
 
 构建结果位于 `dist/`。Shell 生命周期测试通过 `bash tests/bootstrap.test.sh` 和 `bash tests/launcher-modes.test.sh` 运行。
 
-`internal/renew/captcha_solver_ref.go` 中的 CAPTCHA 参考数据由不在仓库中的已标注样本图片生成，见 `internal/renew/genref`。
+延期助手使用当前的 Cap.js v2 `hashwx` 工作量证明流程。官方 `@cap.js/wasm` v0.0.8 内核已嵌入 Go 二进制，并由 wazero 执行，运行时不会下载代码。版本、来源与许可证信息见 `THIRD_PARTY_NOTICES.md`。
 
 发布新版本时运行 `npm version <版本号>`（会同时更新运行脚本中的版本号），再推送提交和标签。Release 工作流会测试并构建该标签，然后创建草稿 Release；检查无误后手动发布。
 

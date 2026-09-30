@@ -32,9 +32,10 @@ const maxResponseBytes = 2 << 20
 var csrfMetaPattern = regexp.MustCompile(`(?i)<meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']`)
 
 type session struct {
-	baseURL   *url.URL
-	client    *http.Client
-	csrfToken string
+	baseURL       *url.URL
+	client        *http.Client
+	csrfToken     string
+	captchaSolver captchaSolverFunc
 }
 
 type authState struct {
@@ -59,7 +60,8 @@ func newSession(config Config) (*session, error) {
 		return nil, fmt.Errorf("create cookie jar: %w", err)
 	}
 	s := &session{
-		baseURL: baseURL,
+		baseURL:       baseURL,
+		captchaSolver: config.captchaSolver,
 		client: &http.Client{
 			Jar:     jar,
 			Timeout: 30 * time.Second,
@@ -70,6 +72,9 @@ func newSession(config Config) (*session, error) {
 				return nil
 			},
 		},
+	}
+	if s.captchaSolver == nil {
+		s.captchaSolver = fetchCapToken
 	}
 	if err := s.loadAuthState(config.AuthStatePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("[renew] WARNING: cached auth state is unusable and will be refreshed: %v", err)
@@ -170,7 +175,6 @@ func (s *session) login(ctx context.Context, username, password string) error {
 	if strings.TrimSpace(token) == "" {
 		return errors.New("login CAPTCHA solver returned an empty token")
 	}
-	payload["captcha_data"] = token
 	payload["captcha_token"] = token
 	result, err = s.request(ctx, http.MethodPost, "/auth/login", payload)
 	if err != nil {
