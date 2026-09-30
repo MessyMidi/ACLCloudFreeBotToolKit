@@ -56,7 +56,7 @@ Runtime files are downloaded from the corresponding Release and verified against
 
 If a new version fails while switching over or starting up, Toolkit restores the previous working version instead of leaving the Bot offline.
 
-Automatic updates can be disabled from the config generator or by editing the related fields in `config.env`.
+Automatic updates can be disabled from the config generator or by changing `--AUTO_UPDATE=enable` to `--AUTO_UPDATE=disable` in the Startup Command, then restarting the Bot.
 
 ### Console
 
@@ -69,6 +69,8 @@ After startup, the ACLClouds Console menu can be used to check service status an
 The config generator has no backend. Your configuration is not submitted to a server operated by this project.
 
 Some form data is saved in the browser's local storage so it survives a page refresh. Sensitive values such as the ACLClouds password and Telegram Token are stored in the browser only if you explicitly choose to remember them.
+
+The Monitor install command, including its Token / Secret, is saved with the other form data. Clear the saved configuration after using a shared browser.
 
 The generated `config.env` may contain:
 

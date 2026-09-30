@@ -100,16 +100,9 @@ file_url() {
 run_for_startup() {
     local dir="$1"
     shift
-    (
-        cd "$dir"
-        exec "$@" bash launcher.sh </dev/null >output.log 2>&1
-    ) &
-    local pid=$!
     # The first prompt is printed only after status and the optional VLESS link,
     # so this is a deterministic completion signal even on slower CI hosts.
-    wait_for_output '请输入数字' "$dir/output.log" || true
-    kill -TERM "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+    run_until_output "$dir" '请输入数字' "$@"
 }
 
 run_for_startup_with_input() {
@@ -117,12 +110,19 @@ run_for_startup_with_input() {
     local input="$2"
     local expected="$3"
     shift 3
+    : > "$dir/output.log"
     (
         cd "$dir"
         exec "$@" bash launcher.sh <"$input" >output.log 2>&1
     ) &
     local pid=$!
-    wait_for_output "$expected" "$dir/output.log" || true
+    if ! wait_for_output "$expected" "$dir/output.log"; then
+        printf 'timed out waiting for: %s\n' "$expected" >&2
+        cat "$dir/output.log" >&2 || true
+        kill -TERM "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        exit 1
+    fi
     kill -TERM "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
 }
@@ -131,6 +131,9 @@ run_until_output() {
     local dir="$1"
     local expected="$2"
     shift 2
+    # Clear the previous launch's readiness before forking. Truncating only
+    # inside the background process lets the parent observe stale output.
+    : > "$dir/output.log"
     (
         cd "$dir"
         exec "$@" bash launcher.sh </dev/null >output.log 2>&1
@@ -273,7 +276,11 @@ MONITOR_VERSION='fixture-v2'
 MONITOR_URL='$(file_url "$monitor_update_dir/assets/lite-v2")'
 MONITOR_SHA256='$monitor_v2_sha'
 EOF
-run_for_startup "$monitor_update_dir" env
+# Delay the child before it redirects output to reproduce the stale-log race.
+(
+    cd() { sleep 0.3; builtin cd "$@"; }
+    run_for_startup "$monitor_update_dir" env
+)
 assert_contains 'Monitor Agent installed (lite fixture-v2)' "$monitor_update_dir/output.log"
 assert_contains 'monitor fixture v2' "$monitor_update_dir/logs/monitor.log"
 
