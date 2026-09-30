@@ -13,12 +13,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/tetratelabs/wazero"
 )
 
 func TestCapClientChallengeAndRedeemProtocolOffline(t *testing.T) {
@@ -78,6 +81,58 @@ func TestCapClientChallengeAndRedeemProtocolOffline(t *testing.T) {
 	}
 	if token != redeemToken {
 		t.Fatalf("redeem token = %q, want %q", token, redeemToken)
+	}
+}
+
+func TestCapClientStartsEveryChallengeWithoutWorkerQueueing(t *testing.T) {
+	const challengeCount = 4
+	challenges := make([]any, challengeCount)
+	for index := range challenges {
+		challenges[index] = map[string]any{
+			"protocol": "hashwx",
+			"payload": map[string]any{
+				"c": fmt.Sprintf("challenge-%d", index),
+				"d": 1,
+				"n": 1,
+			},
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/challenge":
+			writeJSON(t, w, http.StatusOK, map[string]any{
+				"token":      "challenge-token",
+				"format":     2,
+				"challenges": challenges,
+			})
+		case "/redeem":
+			writeJSON(t, w, http.StatusOK, map[string]any{"success": true, "token": "redeem-token"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	allStarted := make(chan struct{})
+	var started atomic.Int32
+	solver := func(ctx context.Context, _ hashwxPayload) (capSolution, error) {
+		if started.Add(1) == challengeCount {
+			close(allStarted)
+		}
+		select {
+		case <-allStarted:
+			return capSolution{Nonce: "0"}, nil
+		case <-ctx.Done():
+			return capSolution{}, ctx.Err()
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client := newCapClient(server.Client(), server.URL, solver)
+	if _, err := client.fetchToken(ctx); err != nil {
+		t.Fatalf("fetchToken returned error: %v (started %d/%d challenges)", err, started.Load(), challengeCount)
 	}
 }
 
@@ -199,5 +254,35 @@ func TestEmbeddedHashwxArtifactAndInputValidation(t *testing.T) {
 	defer solver.close()
 	if _, _, err := solver.solve(hashwxPayload{Challenge: "not-hex", Difficulty: 1, BlockSize: 1}); err == nil {
 		t.Fatal("invalid synthetic payload unexpectedly reached hash computation")
+	}
+}
+
+func TestHashwxChallengesUseIsolatedRuntimesWithSharedCompilationCache(t *testing.T) {
+	const challengeCount = 4
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cache := wazero.NewCompilationCache()
+	defer cache.Close(context.Background())
+
+	errs := make(chan error, challengeCount)
+	for index := range challengeCount {
+		go func(index int) {
+			payload := hashwxPayload{
+				Challenge:  fmt.Sprintf("%064x", index+1),
+				Difficulty: 1,
+				BlockSize:  1,
+			}
+			solution, err := solveHashwxChallengeWithCache(ctx, payload, cache)
+			if err == nil && solution.Nonce != "0" {
+				err = fmt.Errorf("challenge %d nonce = %q, want 0", index, solution.Nonce)
+			}
+			errs <- err
+		}(index)
+	}
+
+	for range challengeCount {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
 	}
 }

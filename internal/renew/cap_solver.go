@@ -34,7 +34,6 @@ const (
 	capMaxChallenges     = 8
 	capMaxDifficulty     = 100_000_000
 	capMaxNoncesPerBlock = 1 << 20
-	capSolverWorkers     = 2
 	capUserAgent         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 		"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
@@ -95,10 +94,15 @@ func newCapClient(httpClient *http.Client, endpoint string, solve capChallengeSo
 }
 
 func fetchCapToken(ctx context.Context) (string, error) {
+	cache := wazero.NewCompilationCache()
+	defer cache.Close(context.Background())
+
 	client := newCapClient(
 		&http.Client{Timeout: 60 * time.Second},
 		capAPIEndpoint,
-		solveHashwxChallenge,
+		func(challengeCtx context.Context, payload hashwxPayload) (capSolution, error) {
+			return solveHashwxChallengeWithCache(challengeCtx, payload, cache)
+		},
 	)
 	return client.fetchToken(ctx)
 }
@@ -140,27 +144,18 @@ func (c *capClient) fetchToken(ctx context.Context) (string, error) {
 
 	solutions := make([]capSolution, len(challenge.Challenges))
 	errs := make([]error, len(challenge.Challenges))
-	jobs := make(chan int)
-	workerCount := min(capSolverWorkers, len(challenge.Challenges))
 	var workers sync.WaitGroup
-	workers.Add(workerCount)
-	for range workerCount {
-		go func() {
+	for index, item := range challenge.Challenges {
+		if item.Protocol != "hashwx" {
+			errs[index] = fmt.Errorf("unsupported protocol %q", item.Protocol)
+			continue
+		}
+		workers.Add(1)
+		go func(index int, payload hashwxPayload) {
 			defer workers.Done()
-			for index := range jobs {
-				item := challenge.Challenges[index]
-				if item.Protocol != "hashwx" {
-					errs[index] = fmt.Errorf("unsupported protocol %q", item.Protocol)
-					continue
-				}
-				solutions[index], errs[index] = c.solve(ctx, item.Payload)
-			}
-		}()
+			solutions[index], errs[index] = c.solve(ctx, payload)
+		}(index, item.Payload)
 	}
-	for index := range challenge.Challenges {
-		jobs <- index
-	}
-	close(jobs)
 	workers.Wait()
 
 	for index, err := range errs {
@@ -221,7 +216,23 @@ func (c *capClient) postJSON(ctx context.Context, path string, body, destination
 }
 
 func solveHashwxChallenge(ctx context.Context, payload hashwxPayload) (capSolution, error) {
-	solver, err := newHashwxSolver(ctx, embeddedHashwxWASM)
+	cache := wazero.NewCompilationCache()
+	defer cache.Close(context.Background())
+	return solveHashwxChallengeWithCache(ctx, payload, cache)
+}
+
+func solveHashwxChallengeWithCache(
+	ctx context.Context,
+	payload hashwxPayload,
+	cache wazero.CompilationCache,
+) (capSolution, error) {
+	runtimeConfig := wazero.NewRuntimeConfig().
+		WithCloseOnContextDone(true).
+		WithCompilationCache(cache)
+	runtime := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
+	defer runtime.Close(context.Background())
+
+	solver, err := newHashwxSolverOn(ctx, runtime, embeddedHashwxWASM)
 	if err != nil {
 		return capSolution{}, err
 	}
@@ -234,20 +245,21 @@ func solveHashwxChallenge(ctx context.Context, payload hashwxPayload) (capSoluti
 }
 
 type hashwxSolver struct {
-	ctx        context.Context
-	runtime    wazero.Runtime
-	main       api.Module
-	contextID  uint32
-	compiled   bool
-	seedPtr    uint32
-	registers  uint32
-	memoryPtr  uint32
-	execBegin  api.Function
-	execFinal  api.Function
-	exec       api.Function
-	make       api.Function
-	module     api.Function
-	moduleSize api.Function
+	ctx         context.Context
+	runtime     wazero.Runtime
+	main        api.Module
+	contextID   uint32
+	compiled    bool
+	seedPtr     uint32
+	registers   uint32
+	memoryPtr   uint32
+	execBegin   api.Function
+	execFinal   api.Function
+	exec        api.Function
+	make        api.Function
+	module      api.Function
+	moduleSize  api.Function
+	ownsRuntime bool
 }
 
 func newHashwxSolver(ctx context.Context, wasm []byte) (*hashwxSolver, error) {
@@ -256,9 +268,26 @@ func newHashwxSolver(ctx context.Context, wasm []byte) (*hashwxSolver, error) {
 	}
 	runtimeConfig := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
 	runtime := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
+	solver, err := newHashwxSolverOn(ctx, runtime, wasm)
+	if err != nil {
+		_ = runtime.Close(context.Background())
+		return nil, err
+	}
+	solver.ownsRuntime = true
+	return solver, nil
+}
+
+// newHashwxSolverOn creates a solver on a caller-owned runtime. Every
+// concurrently solved challenge must use a distinct runtime because the
+// generated hashwx module imports memory from a module hard-coded as "env".
+// CompilationCache may be shared across those runtimes; module instances may
+// not be shared.
+func newHashwxSolverOn(ctx context.Context, runtime wazero.Runtime, wasm []byte) (*hashwxSolver, error) {
+	if len(wasm) == 0 {
+		return nil, errors.New("hashwx WASM is empty")
+	}
 	mainModule, err := runtime.InstantiateWithConfig(ctx, wasm, wazero.NewModuleConfig().WithName("env"))
 	if err != nil {
-		_ = runtime.Close(ctx)
 		return nil, fmt.Errorf("instantiate hashwx WASM: %w", err)
 	}
 
@@ -354,8 +383,13 @@ func (s *hashwxSolver) pointer(name string) (uint32, error) {
 }
 
 func (s *hashwxSolver) close() {
-	if s != nil && s.runtime != nil {
-		_ = s.runtime.Close(s.ctx)
+	if s == nil {
+		return
+	}
+	if s.ownsRuntime && s.runtime != nil {
+		_ = s.runtime.Close(context.Background())
+	} else if s.main != nil {
+		_ = s.main.Close(context.Background())
 	}
 }
 
@@ -455,7 +489,10 @@ func (s *hashwxSolver) solveCompiledBlock(block, blockSize, target uint64) (uint
 			return 0, offset, false, err
 		}
 		result, err := s.execFinal.Call(s.ctx, uint64(s.contextID))
-		if err != nil || len(result) == 0 {
+		if err != nil {
+			return 0, offset, false, fmt.Errorf("finish hashwx execution: %w", err)
+		}
+		if len(result) == 0 {
 			return 0, offset, false, errors.New("finish hashwx execution")
 		}
 		if result[0] <= target {
@@ -470,7 +507,10 @@ func (s *hashwxSolver) solveInterpretedBlock(block, blockSize, target uint64) (u
 	for offset := uint64(0); offset < blockSize; offset++ {
 		candidate := base + offset
 		result, err := s.exec.Call(s.ctx, uint64(s.contextID), candidate)
-		if err != nil || len(result) == 0 {
+		if err != nil {
+			return 0, offset, false, fmt.Errorf("execute hashwx: %w", err)
+		}
+		if len(result) == 0 {
 			return 0, offset, false, errors.New("execute hashwx")
 		}
 		if result[0] <= target {
