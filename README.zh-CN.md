@@ -6,7 +6,7 @@
 
 面向 ACLClouds Free Bot 的配置生成器和运行工具。通过 Web 生成 config.env 与 Startup Command，在非 root 容器中运行 Mihomo、Lite、Komari、CF Server Monitor 和自动延期任务。
 
-**[在线配置生成器](https://acftoolkit.otokonoko.de/)** · [Releases](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases) · [Issues](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/issues)
+**[在线配置生成器](https://acftoolkit.otokonoko.de/)** · [GitHub Pages](https://messymidi.github.io/ACLCloudFreeBotToolKit/) · [Releases](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases) · [Issues](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/issues)
 
 ---
 
