@@ -7,13 +7,13 @@
 
 A configuration generator and runtime helper for ACLClouds Free Bot. Use the Web generator to create `config.env` and a Startup Command for running Mihomo, Lite, Komari, CF Server Monitor, and automatic renewal jobs in a non-root container.
 
-**[Online Config Generator](https://acftoolkit.otokonoko.de/)** · [GitHub Pages](https://messymidi.github.io/ACLCloudFreeBotToolKit/) · [Releases](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases) · [Issues](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/issues)
+**[Online Config Generator](https://messymidi.github.io/ACLCloudFreeBotToolKit/)** · [GitHub Pages](https://messymidi.github.io/ACLCloudFreeBotToolKit/) · [Releases](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases) · [Issues](https://github.com/MessyMidi/ACLCloudFreeBotToolKit/issues)
 
 ---
 
 ## Quick Start
 
-1. Open the [Online Config Generator](https://acftoolkit.otokonoko.de/).
+1. Open the [Online Config Generator](https://messymidi.github.io/ACLCloudFreeBotToolKit/).
 2. Enable the features you need and fill in their settings.
 3. In the ACLClouds Bot file manager, create a new file:
    - Name: `config`
