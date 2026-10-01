@@ -1,6 +1,6 @@
 {
   "name": "aclclouds-config-generator",
-  "version": "0.7.0",
+  "version": "0.7.1-pre1",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",

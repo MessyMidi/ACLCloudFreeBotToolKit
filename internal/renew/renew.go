@@ -197,7 +197,12 @@ func (s *session) renew(ctx context.Context, target server) (Result, error) {
 		return Result{Skipped: true, Message: fmt.Sprintf("%s: renewal_not_available is a normal state%s", target.displayName(), expirySuffix(target.ExpiresAt))}, nil
 	}
 	if captchaRequired(result) {
-		token, solveErr := solveCaptcha(ctx, s, "renewal_gate")
+		// Log the refusal verbatim: whether the renewal gate really demands a
+		// CAPTCHA, or merely returned something that mentions one, is the
+		// difference between a working solver and a wasted solve.
+		log.Printf("[renew] %s: renewal refused pending a CAPTCHA (HTTP %d %s)",
+			target.displayName(), result.Status, responseMessage(result.Body))
+		token, solveErr := solveCaptcha(ctx, s)
 		if solveErr != nil {
 			return Result{}, &attentionError{message: fmt.Sprintf("%s: renewal CAPTCHA solve failed: %v", target.displayName(), solveErr), cause: solveErr}
 		}

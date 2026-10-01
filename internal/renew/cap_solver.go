@@ -18,8 +18,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
+	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +40,33 @@ const (
 	capMaxNoncesPerBlock = 1 << 20
 	capUserAgent         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 		"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+	// capSolveBudget bounds a single hashwx challenge on the wasm layer's own
+	// terms, independent of the caller's context. wazero's CloseOnContextDone
+	// closes a module permanently the moment the context passed to Call is
+	// done, so inheriting the caller's deadline turns "the overall check ran
+	// long" into an unrecoverable "module closed" in every worker at once.
+	//
+	// At production difficulty four concurrent challenges finish in seconds;
+	// this ceiling exists only to stop a runaway generated module from pinning
+	// a worker forever.
+	capSolveBudget = 45 * time.Second
+
+	// capMaxShardsPerChallenge caps how far one challenge's nonce space is
+	// split. Sharding stops paying off well before this, and every shard costs
+	// a full wazero runtime with its own linear memory.
+	capMaxShardsPerChallenge = 8
+
+	// capProgressInterval is how often a still-unfinished solve reports that it
+	// is still working. A healthy solve finishes in a couple of seconds, so
+	// anything shorter would only ever cry wolf.
+	capProgressInterval = 3 * time.Second
+
+	// capSolveGrace is how long the wait may outlast the solver's own budget
+	// before the whole attempt is abandoned. With CloseOnContextDone off there
+	// is nothing that can interrupt a wedged wasm call, so the wait has to be
+	// bounded from the outside.
+	capSolveGrace = 5 * time.Second
 )
 
 // hashwx.wasm is the official @cap.js/wasm v0.0.8 browser kernel. Embedding
@@ -77,7 +108,11 @@ type capRedeemResponse struct {
 	Error   string `json:"error"`
 }
 
-type capChallengeSolver func(context.Context, hashwxPayload) (capSolution, error)
+// capChallengeSolver solves one shard of one challenge. A challenge's nonce
+// space is split across `shards` workers, each searching the blocks congruent
+// to its own index; the first shard to produce a valid nonce wins and its
+// siblings are cancelled.
+type capChallengeSolver func(ctx context.Context, payload hashwxPayload, shard, shards int) (capSolution, error)
 
 type capClient struct {
 	httpClient *http.Client
@@ -100,16 +135,64 @@ func fetchCapToken(ctx context.Context) (string, error) {
 	client := newCapClient(
 		&http.Client{Timeout: 60 * time.Second},
 		capAPIEndpoint,
-		func(challengeCtx context.Context, payload hashwxPayload) (capSolution, error) {
-			return solveHashwxChallengeWithCache(challengeCtx, payload, cache)
+		func(challengeCtx context.Context, payload hashwxPayload, shard, shards int) (capSolution, error) {
+			return solveHashwxChallengeWithCache(challengeCtx, payload, shard, shards, cache)
 		},
 	)
 	return client.fetchToken(ctx)
 }
 
-// solveCaptcha preserves the renewer's existing integration point while the
-// current ACLClouds CAPTCHA no longer uses the old image challenge context.
-func solveCaptcha(ctx context.Context, s *session, _ string) (string, error) {
+// capWorkerBudget returns how many hashwx workers may run at once.
+//
+// It reads GOMAXPROCS rather than NumCPU on purpose: a container's CPU quota is
+// what GOMAXPROCS reflects, while NumCPU reports the host's cores even when the
+// process is pinned to half of one. Getting this backwards would size the
+// worker pool for a machine the process cannot actually use.
+//
+// ACL_CAPTCHA_WORKERS overrides the whole calculation, for hosts where even the
+// container-aware value is wrong.
+func capWorkerBudget() int {
+	if override := strings.TrimSpace(os.Getenv("ACL_CAPTCHA_WORKERS")); override != "" {
+		if n, err := strconv.Atoi(override); err == nil && n > 0 {
+			return n
+		}
+	}
+	budget := runtime.GOMAXPROCS(0)
+	if host := runtime.NumCPU(); host < budget {
+		budget = host
+	}
+	if budget < 1 {
+		budget = 1
+	}
+	return budget
+}
+
+// capChallengeShards decides how many workers split each challenge's nonce
+// space. Hashwx throughput scales with cores but not linearly: measured on a
+// 16-thread host, four workers reached 773k hash/s, eight 1.28M and sixteen
+// 1.38M, while thirty-two regressed. Aiming one worker per usable CPU is
+// therefore near optimal.
+//
+// Overshooting is not catastrophic -- pinned to GOMAXPROCS=1, one through four
+// workers all landed within 6% of each other -- but every extra shard costs a
+// full wazero runtime with its own linear memory, which on a fraction of a CPU
+// is the resource actually worth protecting.
+func capChallengeShards(challenges int) int {
+	if challenges < 1 {
+		return 1
+	}
+	shards := capWorkerBudget() / challenges
+	if shards < 1 {
+		return 1
+	}
+	if shards > capMaxShardsPerChallenge {
+		return capMaxShardsPerChallenge
+	}
+	return shards
+}
+
+// solveCaptcha produces a Cap token for the current ACLClouds CAPTCHA.
+func solveCaptcha(ctx context.Context, s *session) (string, error) {
 	if s == nil || s.captchaSolver == nil {
 		return "", errors.New("CAPTCHA solver is not configured")
 	}
@@ -128,6 +211,7 @@ func (c *capClient) fetchToken(ctx context.Context) (string, error) {
 		return "", errors.New("invalid Cap client configuration")
 	}
 
+	started := time.Now()
 	var challenge capChallenge
 	if err := c.postJSON(ctx, "challenge", map[string]any{}, &challenge); err != nil {
 		return "", fmt.Errorf("Cap challenge: %w", err)
@@ -142,21 +226,136 @@ func (c *capClient) fetchToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("invalid Cap challenge count %d", len(challenge.Challenges))
 	}
 
-	solutions := make([]capSolution, len(challenge.Challenges))
-	errs := make([]error, len(challenge.Challenges))
-	var workers sync.WaitGroup
+	shards := capChallengeShards(len(challenge.Challenges))
+	budget := capWorkerBudget()
+	log.Printf("[renew] CAPTCHA: challenge fetched in %v (format=%d challenges=%d difficulty=%d block=%d)",
+		time.Since(started).Round(time.Millisecond), challenge.Format, len(challenge.Challenges),
+		challenge.Challenges[0].Payload.Difficulty, challenge.Challenges[0].Payload.BlockSize)
+	log.Printf("[renew] CAPTCHA: %d shard(s) per challenge = %d workers, %d at a time (GOMAXPROCS=%d NumCPU=%d)",
+		shards, len(challenge.Challenges)*shards, budget, runtime.GOMAXPROCS(0), runtime.NumCPU())
+
+	// Bounds how many wazero runtimes exist simultaneously. On a fraction of a
+	// CPU the extra workers buy no throughput, so the budget is what keeps
+	// several copies of the module's linear memory from being held at once.
+	semaphore := make(chan struct{}, budget)
+
+	count := len(challenge.Challenges)
+	solutions := make([]capSolution, count)
+	errs := make([]error, count)
+	settled := make([]bool, count)
+	shardCtxs := make([]context.Context, count)
+	stops := make([]context.CancelFunc, count)
+
 	for index, item := range challenge.Challenges {
 		if item.Protocol != "hashwx" {
 			errs[index] = fmt.Errorf("unsupported protocol %q", item.Protocol)
 			continue
 		}
-		workers.Add(1)
-		go func(index int, payload hashwxPayload) {
-			defer workers.Done()
-			solutions[index], errs[index] = c.solve(ctx, payload)
-		}(index, item.Payload)
+		shardCtxs[index], stops[index] = context.WithCancel(ctx)
 	}
-	workers.Wait()
+	// Losing shards are cancelled through this context, which the solver polls
+	// between blocks instead of handing to wasm.
+	defer func() {
+		for _, stop := range stops {
+			if stop != nil {
+				stop()
+			}
+		}
+	}()
+
+	var mutex sync.Mutex
+	var workers sync.WaitGroup
+	solveStart := time.Now()
+	progressDone := make(chan struct{})
+
+	// Reporting separately keeps the log honest about where the time goes: a
+	// challenge that is still hashing looks nothing like a slow HTTP round trip.
+	go func() {
+		ticker := time.NewTicker(capProgressInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-progressDone:
+				return
+			case <-ticker.C:
+				mutex.Lock()
+				var pending []int
+				for index := range settled {
+					if !settled[index] && errs[index] == nil && stops[index] != nil {
+						pending = append(pending, index)
+					}
+				}
+				mutex.Unlock()
+				if len(pending) > 0 {
+					log.Printf("[renew] CAPTCHA: still hashing challenge(s) %v after %v",
+						pending, time.Since(solveStart).Round(100*time.Millisecond))
+				}
+			}
+		}
+	}()
+
+	for index, item := range challenge.Challenges {
+		if stops[index] == nil {
+			continue
+		}
+		for shard := 0; shard < shards; shard++ {
+			workers.Add(1)
+			go func(index, shard int, payload hashwxPayload, shardCtx context.Context, stop context.CancelFunc) {
+				defer workers.Done()
+
+				// Hold a slot for the whole solve, not just for the schedule: the
+				// cost being bounded is a live runtime, not a runnable goroutine.
+				select {
+				case semaphore <- struct{}{}:
+					defer func() { <-semaphore }()
+				case <-shardCtx.Done():
+					return
+				}
+
+				solution, err := c.solve(shardCtx, payload, shard, shards)
+
+				mutex.Lock()
+				defer mutex.Unlock()
+				if err != nil {
+					// Hold on to the first failure, for a challenge nobody solves.
+					if !settled[index] && errs[index] == nil {
+						errs[index] = err
+					}
+					return
+				}
+				if settled[index] {
+					return
+				}
+				settled[index] = true
+				solutions[index] = solution
+				errs[index] = nil
+				stop() // the siblings have nothing left to find
+			}(index, shard, item.Payload, shardCtxs[index], stops[index])
+		}
+	}
+	// Nothing can interrupt a wedged wasm call, so the wait is bounded from the
+	// outside too: one hung shard must not hang the whole renewal check.
+	finished := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(finished)
+	}()
+
+	select {
+	case <-finished:
+	case <-time.After(capSolveBudget + capSolveGrace):
+		return "", fmt.Errorf("Cap solving did not finish within %v", capSolveBudget+capSolveGrace)
+	}
+	close(progressDone)
+
+	solved := 0
+	for _, ok := range settled {
+		if ok {
+			solved++
+		}
+	}
+	log.Printf("[renew] CAPTCHA: %d/%d challenges solved in %v",
+		solved, count, time.Since(solveStart).Round(time.Millisecond))
 
 	for index, err := range errs {
 		if err != nil {
@@ -164,6 +363,7 @@ func (c *capClient) fetchToken(ctx context.Context) (string, error) {
 		}
 	}
 
+	redeemStart := time.Now()
 	var redeem capRedeemResponse
 	if err := c.postJSON(ctx, "redeem", map[string]any{
 		"token":     challenge.Token,
@@ -177,6 +377,8 @@ func (c *capClient) fetchToken(ctx context.Context) (string, error) {
 	if strings.TrimSpace(redeem.Token) == "" {
 		return "", errors.New("Cap redeem returned an empty token")
 	}
+	log.Printf("[renew] CAPTCHA: token redeemed in %v (total %v)",
+		time.Since(redeemStart).Round(time.Millisecond), time.Since(started).Round(time.Millisecond))
 	return redeem.Token, nil
 }
 
@@ -218,26 +420,43 @@ func (c *capClient) postJSON(ctx context.Context, path string, body, destination
 func solveHashwxChallenge(ctx context.Context, payload hashwxPayload) (capSolution, error) {
 	cache := wazero.NewCompilationCache()
 	defer cache.Close(context.Background())
-	return solveHashwxChallengeWithCache(ctx, payload, cache)
+	return solveHashwxChallengeWithCache(ctx, payload, 0, 1, cache)
 }
 
 func solveHashwxChallengeWithCache(
 	ctx context.Context,
 	payload hashwxPayload,
+	shard, shards int,
 	cache wazero.CompilationCache,
 ) (capSolution, error) {
-	runtimeConfig := wazero.NewRuntimeConfig().
-		WithCloseOnContextDone(true).
-		WithCompilationCache(cache)
-	runtime := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
+	// The wasm layer runs on a budget it owns. ctx is only polled between
+	// blocks, so a caller that gives up stops the search without tearing the
+	// module down mid-instruction.
+	solveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), capSolveBudget)
+	defer cancel()
+
+	// CloseOnContextDone is deliberately NOT enabled. wazero inserts a periodic
+	// context check into every compiled function when it is, and that check
+	// lands inside the per-hash loop: measured on this machine, 57.5k hash/s
+	// with the guard against 280k without, a 4.87x tax on the whole solve.
+	//
+	// What the guard buys is a way to interrupt a wedged module, which hashwx
+	// does not need. The kernel is the pinned official build (hash-checked by
+	// TestEmbeddedHashwxArtifactAndInputValidation) and every call performs a
+	// fixed amount of work, so a runaway search is caught between blocks by
+	// budgetErr and callerErr, and a genuinely hung shard is abandoned by the
+	// bounded wait in fetchToken.
+	runtimeConfig := wazero.NewRuntimeConfig().WithCompilationCache(cache)
+	runtime := wazero.NewRuntimeWithConfig(solveCtx, runtimeConfig)
 	defer runtime.Close(context.Background())
 
-	solver, err := newHashwxSolverOn(ctx, runtime, embeddedHashwxWASM)
+	solver, err := newHashwxSolverOn(solveCtx, runtime, embeddedHashwxWASM)
 	if err != nil {
 		return capSolution{}, err
 	}
+	solver.caller = ctx
 	defer solver.close()
-	nonce, _, err := solver.solve(payload)
+	nonce, _, err := solver.solveShard(payload, uint64(shard), uint64(shards))
 	if err != nil {
 		return capSolution{}, err
 	}
@@ -245,7 +464,15 @@ func solveHashwxChallengeWithCache(
 }
 
 type hashwxSolver struct {
-	ctx         context.Context
+	// ctx bounds the module and every Call made on it. Because
+	// CloseOnContextDone is enabled, wazero closes the module for good the
+	// moment this context is done, so it must be a budget this layer owns --
+	// never the caller's.
+	ctx context.Context
+	// caller is the optional cancellation source, polled between blocks so an
+	// abandoned search stops early without destroying the module. Nil means no
+	// caller signal.
+	caller      context.Context
 	runtime     wazero.Runtime
 	main        api.Module
 	contextID   uint32
@@ -266,8 +493,8 @@ func newHashwxSolver(ctx context.Context, wasm []byte) (*hashwxSolver, error) {
 	if len(wasm) == 0 {
 		return nil, errors.New("hashwx WASM is empty")
 	}
-	runtimeConfig := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
-	runtime := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
+	// Same configuration as the production path: no CloseOnContextDone.
+	runtime := wazero.NewRuntime(ctx)
 	solver, err := newHashwxSolverOn(ctx, runtime, wasm)
 	if err != nil {
 		_ = runtime.Close(context.Background())
@@ -393,10 +620,33 @@ func (s *hashwxSolver) close() {
 	}
 }
 
-// solve walks hashwx blocks until a nonce hashes at or below
-// (2^64-1)/difficulty. Difficulty, block size and challenge bytes always come
-// from the server response; none are fixed to current production values.
-func (s *hashwxSolver) solve(payload hashwxPayload) (uint64, uint64, error) {
+// budgetErr reports whether this solver's own budget is spent. Spending it is
+// the one case where wazero is allowed to close the module.
+func (s *hashwxSolver) budgetErr() error {
+	if err := s.ctx.Err(); err != nil {
+		return fmt.Errorf("hashwx budget exhausted: %w", err)
+	}
+	return nil
+}
+
+// callerErr reports the caller's cancellation. It is deliberately polled
+// between blocks rather than inherited through the solver: handing this
+// context to wasm would let the caller's deadline close the module for good.
+func (s *hashwxSolver) callerErr() error {
+	if s.caller == nil {
+		return nil
+	}
+	if err := s.caller.Err(); err != nil {
+		return fmt.Errorf("hashwx solve abandoned: %w", err)
+	}
+	return nil
+}
+
+// solveShard searches only the blocks this worker owns: block ≡ shard (mod
+// shards). Difficulty, block size and challenge bytes always come from the
+// server response; none are fixed to current production values. Any nonce below
+// the target wins, so separate shards legitimately return different nonces.
+func (s *hashwxSolver) solveShard(payload hashwxPayload, shard, shards uint64) (uint64, uint64, error) {
 	challenge, err := hex.DecodeString(payload.Challenge)
 	if err != nil || len(challenge) != sha256.Size {
 		return 0, 0, errors.New("invalid hashwx challenge")
@@ -416,9 +666,16 @@ func (s *hashwxSolver) solve(payload hashwxPayload) (uint64, uint64, error) {
 	memory := s.main.Memory()
 	blockSize := uint64(payload.BlockSize)
 
+	if shards < 1 {
+		shards = 1
+	}
+
 	var hashes uint64
-	for block := uint64(0); block <= 1<<20; block++ {
-		if err := s.ctx.Err(); err != nil {
+	for block := shard; block <= 1<<20; block += shards {
+		if err := s.budgetErr(); err != nil {
+			return 0, hashes, err
+		}
+		if err := s.callerErr(); err != nil {
 			return 0, hashes, err
 		}
 		binary.LittleEndian.PutUint64(seedInput[sha256.Size:], block)

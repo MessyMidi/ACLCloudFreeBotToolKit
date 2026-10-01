@@ -45,7 +45,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	// One check can solve Cap twice -- once for the login, once for the renewal
+	// gate -- and a third time when the cached session turns out to be expired.
+	// Each round is three HTTP calls plus a concurrent proof of work, so the
+	// budget has to cover several solves, not one.
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
 	result, err := renew.Check(ctx, config)

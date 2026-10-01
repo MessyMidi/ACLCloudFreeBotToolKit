@@ -64,7 +64,7 @@ func TestCapClientChallengeAndRedeemProtocolOffline(t *testing.T) {
 	}))
 	defer server.Close()
 
-	solver := func(_ context.Context, payload hashwxPayload) (capSolution, error) {
+	solver := func(_ context.Context, payload hashwxPayload, _, _ int) (capSolution, error) {
 		switch payload.Challenge {
 		case "first":
 			return capSolution{Nonce: "101"}, nil
@@ -86,6 +86,9 @@ func TestCapClientChallengeAndRedeemProtocolOffline(t *testing.T) {
 
 func TestCapClientStartsEveryChallengeWithoutWorkerQueueing(t *testing.T) {
 	const challengeCount = 4
+	// This test requires four worker slots regardless of the CI CPU quota.
+	// Production intentionally queues challenges when fewer slots are available.
+	t.Setenv("ACL_CAPTCHA_WORKERS", "4")
 	challenges := make([]any, challengeCount)
 	for index := range challenges {
 		challenges[index] = map[string]any{
@@ -116,7 +119,7 @@ func TestCapClientStartsEveryChallengeWithoutWorkerQueueing(t *testing.T) {
 
 	allStarted := make(chan struct{})
 	var started atomic.Int32
-	solver := func(ctx context.Context, _ hashwxPayload) (capSolution, error) {
+	solver := func(ctx context.Context, _ hashwxPayload, _, _ int) (capSolution, error) {
 		if started.Add(1) == challengeCount {
 			close(allStarted)
 		}
@@ -149,7 +152,7 @@ func TestCapClientRejectsUnsupportedProtocolWithoutSolving(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newCapClient(server.Client(), server.URL, func(context.Context, hashwxPayload) (capSolution, error) {
+	client := newCapClient(server.Client(), server.URL, func(context.Context, hashwxPayload, int, int) (capSolution, error) {
 		calls.Add(1)
 		return capSolution{}, nil
 	})
@@ -162,6 +165,35 @@ func TestCapClientRejectsUnsupportedProtocolWithoutSolving(t *testing.T) {
 	}
 }
 
+func TestCapClientRejectsLegacyImageChallengeWithoutFallback(t *testing.T) {
+	var calls atomic.Int32
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != "/challenge" {
+			t.Errorf("unexpected legacy verification or redemption request: %s", r.URL.Path)
+		}
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"token":   "legacy-image-challenge",
+			"target":  "Cloud",
+			"options": []string{"data:image/png;base64,unused"},
+		})
+	}))
+	defer server.Close()
+
+	client := newCapClient(server.Client(), server.URL, func(context.Context, hashwxPayload, int, int) (capSolution, error) {
+		calls.Add(1)
+		return capSolution{}, nil
+	})
+	_, err := client.fetchToken(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "unsupported Cap format") {
+		t.Fatalf("fetchToken error = %v, want unsupported Cap format", err)
+	}
+	if calls.Load() != 0 || requests.Load() != 1 {
+		t.Fatalf("legacy challenge triggered solver/fallback: calls=%d requests=%d", calls.Load(), requests.Load())
+	}
+}
+
 func TestCapClientDoesNotExposeResponseSecretsInErrors(t *testing.T) {
 	const secret = "one-time-secret-material"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +201,7 @@ func TestCapClientDoesNotExposeResponseSecretsInErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newCapClient(server.Client(), server.URL, func(context.Context, hashwxPayload) (capSolution, error) {
+	client := newCapClient(server.Client(), server.URL, func(context.Context, hashwxPayload, int, int) (capSolution, error) {
 		return capSolution{}, nil
 	})
 	_, err := client.fetchToken(context.Background())
@@ -184,7 +216,7 @@ func TestCapClientDoesNotExposeResponseSecretsInErrors(t *testing.T) {
 func TestSolveCaptchaUsesConfiguredProviderWithoutLoggingToken(t *testing.T) {
 	const token = "private-cap-token"
 	s := &session{captchaSolver: func(context.Context) (string, error) { return token, nil }}
-	got, err := solveCaptcha(context.Background(), s, "login")
+	got, err := solveCaptcha(context.Background(), s)
 	if err != nil {
 		t.Fatalf("solveCaptcha returned error: %v", err)
 	}
@@ -252,7 +284,7 @@ func TestEmbeddedHashwxArtifactAndInputValidation(t *testing.T) {
 		t.Fatalf("instantiate embedded hashwx.wasm: %v", err)
 	}
 	defer solver.close()
-	if _, _, err := solver.solve(hashwxPayload{Challenge: "not-hex", Difficulty: 1, BlockSize: 1}); err == nil {
+	if _, _, err := solver.solveShard(hashwxPayload{Challenge: "not-hex", Difficulty: 1, BlockSize: 1}, 0, 1); err == nil {
 		t.Fatal("invalid synthetic payload unexpectedly reached hash computation")
 	}
 }
@@ -272,7 +304,7 @@ func TestHashwxChallengesUseIsolatedRuntimesWithSharedCompilationCache(t *testin
 				Difficulty: 1,
 				BlockSize:  1,
 			}
-			solution, err := solveHashwxChallengeWithCache(ctx, payload, cache)
+			solution, err := solveHashwxChallengeWithCache(ctx, payload, 0, 1, cache)
 			if err == nil && solution.Nonce != "0" {
 				err = fmt.Errorf("challenge %d nonce = %q, want 0", index, solution.Nonce)
 			}
@@ -285,4 +317,127 @@ func TestHashwxChallengesUseIsolatedRuntimesWithSharedCompilationCache(t *testin
 			t.Fatal(err)
 		}
 	}
+}
+
+// TestExhaustedCallerAbandonsWithoutClosingTheModule is the regression test for
+// the reported production failure:
+//
+//	Cap challenge 0: finish hashwx execution:
+//	    module closed with context deadline exceeded
+//
+// The caller's context used to reach wasm through Call, and with
+// CloseOnContextDone enabled wazero closes the module permanently once that
+// context is done -- so an exhausted overall check budget surfaced as an
+// unsolvable CAPTCHA. The caller's context is now polled between blocks
+// instead, which stops the search early and leaves the module layer reusable.
+func TestExhaustedCallerAbandonsWithoutClosingTheModule(t *testing.T) {
+	cache := wazero.NewCompilationCache()
+	defer cache.Close(context.Background())
+
+	callerCtx, cancel := context.WithCancel(context.Background())
+	cancel() // the overall check has already given up
+
+	slow := hashwxPayload{
+		Challenge:  strings.Repeat("ab", sha256.Size),
+		Difficulty: 250_000,
+		BlockSize:  1 << 16,
+	}
+
+	_, err := solveHashwxChallengeWithCache(callerCtx, slow, 0, 1, cache)
+	if err == nil {
+		t.Fatal("solve ignored a cancelled caller context")
+	}
+	if strings.Contains(err.Error(), "module closed") {
+		t.Fatalf("caller context reached the wasm layer: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if !strings.Contains(err.Error(), "abandoned") {
+		t.Fatalf("err = %v, want an abandonment notice", err)
+	}
+
+	// The module layer must still be usable rather than wedged.
+	fast := hashwxPayload{
+		Challenge:  strings.Repeat("cd", sha256.Size),
+		Difficulty: 1,
+		BlockSize:  1,
+	}
+	solution, err := solveHashwxChallengeWithCache(context.Background(), fast, 0, 1, cache)
+	if err != nil {
+		t.Fatalf("solve after an abandoned attempt: %v", err)
+	}
+	if solution.Nonce != "0" {
+		t.Fatalf("nonce = %q, want 0", solution.Nonce)
+	}
+}
+
+// TestSharedExhaustedCallerAbandonsEveryWorker mirrors the real call shape: one
+// context shared by all concurrent challenges. A single expired budget used to
+// close four modules at once, and the reporting loop then blamed challenge 0.
+func TestSharedExhaustedCallerAbandonsEveryWorker(t *testing.T) {
+	cache := wazero.NewCompilationCache()
+	defer cache.Close(context.Background())
+
+	callerCtx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-callerCtx.Done()
+
+	const workers = 4
+	payload := hashwxPayload{
+		Challenge:  strings.Repeat("ab", sha256.Size),
+		Difficulty: 250_000,
+		BlockSize:  1 << 16,
+	}
+
+	errs := make(chan error, workers)
+	for range workers {
+		go func() {
+			_, err := solveHashwxChallengeWithCache(callerCtx, payload, 0, 1, cache)
+			errs <- err
+		}()
+	}
+
+	for range workers {
+		err := <-errs
+		if err == nil {
+			t.Fatal("a worker ignored the expired caller context")
+		}
+		if strings.Contains(err.Error(), "module closed") {
+			t.Fatalf("module closed instead of abandoning cleanly: %v", err)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+		}
+	}
+}
+
+// TestSolverOwnBudgetStillTerminates proves the solver still stops itself once
+// its budget is spent. Since CloseOnContextDone was turned off for the 4.87x
+// throughput it cost, the budget is now enforced between blocks rather than by
+// wazero tearing the module down, and the error says so.
+func TestSolverOwnBudgetStillTerminates(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	solver, err := newHashwxSolver(ctx, embeddedHashwxWASM)
+	if err != nil {
+		t.Fatalf("instantiate embedded hashwx.wasm: %v", err)
+	}
+	defer solver.close()
+
+	start := time.Now()
+	_, _, err = solver.solveShard(hashwxPayload{
+		Challenge:  strings.Repeat("ab", sha256.Size),
+		Difficulty: capMaxDifficulty,
+		BlockSize:  1 << 16,
+	}, 0, 1)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("a solver with a two second budget ran to completion")
+	}
+	if elapsed > 8*time.Second {
+		t.Fatalf("solver ignored its own budget for %v", elapsed)
+	}
+	t.Logf("solver budget stopped the search after %v: %v", elapsed.Round(time.Millisecond), err)
 }

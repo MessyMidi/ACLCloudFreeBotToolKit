@@ -168,7 +168,9 @@ func (s *session) login(ctx context.Context, username, password string) error {
 		return fmt.Errorf("login rejected: HTTP %d %s", result.Status, responseMessage(result.Body))
 	}
 
-	token, err := solveCaptcha(ctx, s, "login")
+	log.Printf("[renew] login refused pending a CAPTCHA (HTTP %d %s)",
+		result.Status, responseMessage(result.Body))
+	token, err := solveCaptcha(ctx, s)
 	if err != nil {
 		return fmt.Errorf("login CAPTCHA solve failed: %w", err)
 	}
