@@ -62,6 +62,8 @@ Automatic updates can be disabled from the config generator or by changing `--AU
 
 After startup, the ACLClouds Console menu can be used to check service status and view Mihomo, monitor, and automatic renewal logs.
 
+Log views show the last three renewal checks (including their full output), or the last 20 lines for Mihomo and Monitor. Within a log view, enter `1` to show all retained logs, or `0` to return to the main menu. Logs removed by size limits cannot be displayed.
+
 ---
 
 ## Data and Privacy

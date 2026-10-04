@@ -63,6 +63,7 @@ jobs:
           npm test
           bash tests/bootstrap.test.sh
           bash tests/launcher-modes.test.sh
+          bash tests/launcher-console.test.sh
 
       - name: Build
         run: npm run build

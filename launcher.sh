@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-LAUNCHER_VERSION='0.7.1'
+LAUNCHER_VERSION='0.7.2'
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$BASE_DIR/bin"
@@ -955,29 +955,75 @@ show_status() {
     printf '\n'
 }
 
-show_renew_log() {
-    if [[ "$RENEW_ENABLED" != "1" ]]; then
-        printf '\nAutomatic renewal is disabled in config.env.\n\n'
-        return
-    fi
-    printf '\n--- Automatic renewal log ---\n'
-    if [[ -s "$RENEW_LOG" ]]; then
-        show_log_tail "$RENEW_LOG" 120
+# Renewal records span multiple lines. Find the last three check boundaries
+# without loading the whole history into memory. Include an in-progress check.
+# Old logs without boundaries fall back to their last three lines.
+show_recent_renew_log() {
+    local start_line
+    start_line="$(awk '
+        /^===== renewal check .* =====\r?$/ {
+            starts[count % 3] = NR
+            count++
+        }
+        END {
+            if (count > 0) print starts[(count > 3 ? count % 3 : 0)]
+        }
+    ' "$RENEW_LOG")"
+    if [[ -n "$start_line" ]]; then
+        sed -n "${start_line},\$p" "$RENEW_LOG"
     else
-        printf 'No renewal check result is available yet.\n'
+        show_log_tail "$RENEW_LOG" 3
     fi
-    printf '\n'
+}
+
+CONSOLE_LOG_VIEW=''
+
+show_log_options() {
+    if [[ "$CONSOLE_LANG" == 'en' ]]; then
+        printf '\n[1] Show all retained logs\n[0] Back to main menu\n'
+    else
+        printf '\n[1] 输出全部已保留日志\n[0] 返回上级菜单\n'
+    fi
+    printf '%s' "$MENU_PROMPT"
+}
+
+show_console_log() {
+    local view="$1"
+    local mode="${2:-recent}"
+    local file title
+    case "$view" in
+        mihomo) file="$MIHOMO_LOG"; title='Mihomo log' ;;
+        monitor) file="$MONITOR_LOG"; title='Monitor log' ;;
+        renew) file="$RENEW_LOG"; title='Automatic renewal log' ;;
+        *) return 1 ;;
+    esac
+    printf '\n--- %s ---\n' "$title"
+    if [[ ! -s "$file" ]]; then
+        if [[ "$CONSOLE_LANG" == 'en' ]]; then
+            printf 'No log records are available yet.\n'
+        else
+            printf '暂无日志记录。\n'
+        fi
+    elif [[ "$mode" == 'all' ]]; then
+        cat "$file"
+    elif [[ "$view" == 'renew' ]]; then
+        show_recent_renew_log
+    else
+        show_log_tail "$file" 20
+    fi
+    CONSOLE_LOG_VIEW="$view"
+    show_log_options
 }
 
 if [[ "$CONSOLE_LANG" == "en" ]]; then
     MENU_ITEMS=(
         '[1] Service status'
         '[2] Proxy link'
-        '[3] Mihomo log (last 120 lines)'
-        '[4] Monitor log (last 120 lines)'
+        '[3] Mihomo log (last 20 lines)'
+        '[4] Monitor log (last 20 lines)'
         '[5] Restart Mihomo'
         '[6] Restart Monitor'
-        '[7] Renewal log (last 120 lines)'
+        '[7] Renewal log (last 3 checks)'
         '[0] Show menu'
     )
     MENU_PROMPT='Enter a number: '
@@ -986,11 +1032,11 @@ else
     MENU_ITEMS=(
         '[1] 服务状态'
         '[2] 代理链接'
-        '[3] Mihomo 日志（最近 120 行）'
-        '[4] Monitor 日志（最近 120 行）'
+        '[3] Mihomo 日志（最近 20 行）'
+        '[4] Monitor 日志（最近 20 行）'
         '[5] 重启 Mihomo'
         '[6] 重启 Monitor'
-        '[7] 自动延期日志（最近 120 行）'
+        '[7] 自动延期日志（最近 3 次检查）'
         '[0] 显示菜单'
     )
     MENU_PROMPT='请输入数字: '
@@ -1037,6 +1083,23 @@ while true; do
         continue
     fi
 
+    # Keep this state in the main read loop: a blocking submenu would stop
+    # watchdog checks and log maintenance while waiting for Console input.
+    if [[ -n "$CONSOLE_LOG_VIEW" ]]; then
+        case "$choice" in
+            1) show_console_log "$CONSOLE_LOG_VIEW" all ;;
+            0)
+                CONSOLE_LOG_VIEW=''
+                show_menu
+                ;;
+            *)
+                printf '%s %s\n' "$MENU_UNKNOWN" "$choice"
+                show_log_options
+                ;;
+        esac
+        continue
+    fi
+
     case "$choice" in
         1)
             show_status
@@ -1045,14 +1108,12 @@ while true; do
             show_link
             ;;
         3)
-            printf '\n--- Mihomo log ---\n'
-            show_log_tail "$MIHOMO_LOG" 120
-            printf '\n'
+            show_console_log mihomo
+            continue
             ;;
         4)
-            printf '\n--- Monitor log ---\n'
-            show_log_tail "$MONITOR_LOG" 120
-            printf '\n'
+            show_console_log monitor
+            continue
             ;;
         5)
             restart_mihomo
@@ -1063,7 +1124,8 @@ while true; do
             show_status
             ;;
         7)
-            show_renew_log
+            show_console_log renew
+            continue
             ;;
         0)
             show_menu

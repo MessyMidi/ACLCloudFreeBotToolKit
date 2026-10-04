@@ -431,7 +431,10 @@ WATCHDOG_STABLE_SECONDS='9999'
 EOF
 make_counted_crashing_monitor "$monitor_watchdog_dir/bin/lite-agent"
 printf "MONITOR_SHA256='%s'\n" "$(sha256sum "$monitor_watchdog_dir/bin/lite-agent" | awk '{print $1}')" >> "$monitor_watchdog_dir/config.env"
-run_until_output "$monitor_watchdog_dir" 'Monitor watchdog stopped after 2 restart attempts' env
+# Staying inside a log submenu must not pause watchdog restart attempts.
+printf '4\n' > "$monitor_watchdog_dir/console.input"
+run_for_startup_with_input "$monitor_watchdog_dir" console.input 'Monitor watchdog stopped after 2 restart attempts' env
+assert_contains '输出全部已保留日志' "$monitor_watchdog_dir/output.log"
 assert_contains '^3$' "$monitor_watchdog_dir/bin/lite-agent.starts"
 assert_contains 'Monitor crashed; watchdog restart 1/2 scheduled in 1s' "$monitor_watchdog_dir/output.log"
 assert_contains 'Monitor crashed; watchdog restart 2/2 scheduled in 2s' "$monitor_watchdog_dir/output.log"
@@ -578,6 +581,6 @@ AUTO_RENEW_ENABLED='1'
 CONSOLE_LANG='en'
 EOF
 run_until_output "$english_dir" 'Enter a number: ' env
-assert_contains '^\[7\] Renewal log (last 120 lines)$' "$english_dir/output.log"
+assert_contains '^\[7\] Renewal log (last 3 checks)$' "$english_dir/output.log"
 
 printf 'launcher mode tests passed\n'

@@ -46,7 +46,10 @@ jobs:
         run: git diff --check
 
       - name: Check shell syntax
-        run: bash -n bootstrap.sh launcher.sh tests/bootstrap.test.sh tests/launcher-modes.test.sh
+        run: |
+          for script in bootstrap.sh launcher.sh tests/bootstrap.test.sh tests/launcher-modes.test.sh tests/launcher-console.test.sh; do
+            bash -n "$script"
+          done
 
       - name: ShellCheck
         run: shellcheck --severity=warning bootstrap.sh launcher.sh
@@ -76,6 +79,9 @@ jobs:
 
       - name: Test launcher modes and watchdogs
         run: bash tests/launcher-modes.test.sh
+
+      - name: Test Console log views
+        run: bash tests/launcher-console.test.sh
 
       - name: Build release assets
         run: npm run build
