@@ -19,7 +19,8 @@ import { TESTED_VERSIONS } from '../src/constants';
 // defaults, and the example config; these tests keep the copies in sync.
 
 function monitorBranch(type: string): string {
-  const match = launcherScript.match(new RegExp(`^\\s+${type}\\)\\n([\\s\\S]*?)^\\s+;;`, 'm'));
+  const defaults = launcherScript.split('# ---------------- Defaults ----------------')[1];
+  const match = defaults?.match(new RegExp(`^\\s+${type}\\)\\n([\\s\\S]*?)^\\s+;;`, 'm'));
   if (!match?.[1]) throw new Error(`launcher.sh has no ${type} branch`);
   return match[1];
 }

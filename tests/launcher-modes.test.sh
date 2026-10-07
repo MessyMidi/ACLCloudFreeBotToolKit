@@ -175,6 +175,120 @@ assert_after() {
     fi
 }
 
+# Exercise the real configuration/defaults boundary without starting services
+# or contacting upstream. Old generated pins must not mask a launcher update.
+pins_dir="$(make_fixture official-pins)"
+sed '/^signal_bootstrap_installing$/,$d' "$PROJECT_DIR/launcher.sh" > "$pins_dir/pins.sh"
+cat >> "$pins_dir/pins.sh" <<'EOF'
+printf 'resolved-mihomo=%s|%s|%s|%s|%s\n' "$MIHOMO_VERSION" "$MIHOMO_URL" "$MIHOMO_SHA256" "$MIHOMO_FALLBACK_URL" "$MIHOMO_FALLBACK_SHA256"
+printf 'resolved-monitor=%s|%s|%s\n' "$MONITOR_VERSION" "$MONITOR_URL" "$MONITOR_SHA256"
+EOF
+cat > "$pins_dir/old.env" <<'EOF'
+MIHOMO_ENABLED='0'
+MONITOR_ENABLED='1'
+MONITOR_TYPE='lite'
+MONITOR_ENDPOINT='https://monitor.example.com'
+MONITOR_TOKEN='fixture-token'
+MONITOR_AGENT_ID='fixture-id'
+MIHOMO_VERSION='v1.19.31'
+MIHOMO_URL='https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-linux-amd64-v1-v1.19.31.gz'
+MIHOMO_SHA256='d4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114'
+MIHOMO_FALLBACK_URL='https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-linux-amd64-compatible-v1.19.31.gz'
+MIHOMO_FALLBACK_SHA256='04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc'
+MONITOR_VERSION='2.3.3.5'
+MONITOR_URL='https://github.com/nuomiiiii/Lite-agent/releases/download/2.3.3.5/Lite-agent-linux-amd64'
+MONITOR_SHA256='c39042e712bd204a5ea359b6d0f0f5b2c3e6bf6fa9bdcd8954e8fad30f32a6ed'
+EOF
+run_pins() {
+    cp "$pins_dir/config.env" "$pins_dir/before.env"
+    (cd "$pins_dir" && bash pins.sh >output.log 2>&1)
+    cmp "$pins_dir/before.env" "$pins_dir/config.env"
+}
+cp "$pins_dir/old.env" "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-mihomo=v1.19.32|.*306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc.*ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20$' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=2.3.6.0|.*d973b48edba2c1be9faea959c231dc6a278fa40ad283d53a459f8ad7727ef15b$' "$pins_dir/output.log"
+for field in MIHOMO_VERSION MIHOMO_URL MIHOMO_SHA256 MIHOMO_FALLBACK_URL MIHOMO_FALLBACK_SHA256 MONITOR_VERSION MONITOR_URL MONITOR_SHA256; do
+    for value in custom ''; do
+        cp "$pins_dir/old.env" "$pins_dir/config.env"
+        printf "%s='%s'\n" "$field" "$value" >> "$pins_dir/config.env"
+        run_pins
+        if [[ "$field" == MIHOMO_* ]]; then
+            assert_contains 'mihomo-linux-amd64-.*v1.19.31.gz' "$pins_dir/output.log"
+        else
+            assert_contains '^resolved-monitor=.*2.3.3.5' "$pins_dir/output.log"
+        fi
+    done
+done
+cp "$pins_dir/old.env" "$pins_dir/config.env"
+printf "RUNTIME_VERSIONS_PINNED='1'\n" >> "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-mihomo=v1.19.31|' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=2.3.3.5|' "$pins_dir/output.log"
+cp "$pins_dir/old.env" "$pins_dir/config.env"
+cat >> "$pins_dir/config.env" <<'EOF'
+MONITOR_TYPE='cfsm'
+MONITOR_VERSION='v1.0.18'
+MONITOR_URL='https://github.com/huilang-me/cfsm-agent/releases/download/v1.0.18/cf-probe-linux-amd64'
+MONITOR_SHA256='757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa'
+EOF
+cp "$pins_dir/config.env" "$pins_dir/cfsm.env"
+run_pins
+assert_contains '^resolved-monitor=v1.0.19|.*64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c$' "$pins_dir/output.log"
+for field in MONITOR_VERSION MONITOR_URL MONITOR_SHA256; do
+    cp "$pins_dir/cfsm.env" "$pins_dir/config.env"
+    printf "%s='custom'\n" "$field" >> "$pins_dir/config.env"
+    run_pins
+    assert_contains '^resolved-monitor=.*v1.0.18' "$pins_dir/output.log"
+done
+cp "$pins_dir/cfsm.env" "$pins_dir/config.env"
+printf "RUNTIME_VERSIONS_PINNED='1'\n" >> "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-monitor=v1.0.18|' "$pins_dir/output.log"
+
+# Legacy generated configs did not always include checksums. Leaving their
+# old URLs in place must never attach a new release's digest to those URLs.
+for pinned in 0 1; do
+    for missing in primary fallback both; do
+        cp "$pins_dir/old.env" "$pins_dir/config.env"
+        case "$missing" in
+            primary) sed -i '/^MIHOMO_SHA256=/d' "$pins_dir/config.env" ;;
+            fallback) sed -i '/^MIHOMO_FALLBACK_SHA256=/d' "$pins_dir/config.env" ;;
+            both) sed -i '/^MIHOMO_\(FALLBACK_\)\?SHA256=/d' "$pins_dir/config.env" ;;
+        esac
+        printf "RUNTIME_VERSIONS_PINNED='%s'\n" "$pinned" >> "$pins_dir/config.env"
+        run_pins
+        assert_contains '^resolved-mihomo=v1.19.31|.*d4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114.*04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc$' "$pins_dir/output.log"
+    done
+    for monitor_type in lite cfsm; do
+        base_env="$pins_dir/old.env"
+        legacy_version='2.3.3.5'
+        legacy_sha='c39042e712bd204a5ea359b6d0f0f5b2c3e6bf6fa9bdcd8954e8fad30f32a6ed'
+        if [[ "$monitor_type" == cfsm ]]; then
+            base_env="$pins_dir/cfsm.env"
+            legacy_version='v1.0.18'
+            legacy_sha='757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa'
+        fi
+        for empty in omitted blank; do
+            sed '/^MONITOR_SHA256=/d' "$base_env" > "$pins_dir/config.env"
+            [[ "$empty" != blank ]] || printf "MONITOR_SHA256=''\n" >> "$pins_dir/config.env"
+            printf "RUNTIME_VERSIONS_PINNED='%s'\n" "$pinned" >> "$pins_dir/config.env"
+            run_pins
+            assert_contains "^resolved-monitor=$legacy_version|.*$legacy_sha$" "$pins_dir/output.log"
+        done
+    done
+done
+# Version-only legacy overrides use that version's implicit official URLs.
+sed '/^MIHOMO_\(FALLBACK_\)\?\(URL\|SHA256\)=/d; /^MONITOR_\(URL\|SHA256\)=/d' "$pins_dir/old.env" > "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-mihomo=v1.19.31|.*d4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114.*04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc$' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=2.3.3.5|.*c39042e712bd204a5ea359b6d0f0f5b2c3e6bf6fa9bdcd8954e8fad30f32a6ed$' "$pins_dir/output.log"
+# Filling a missing official digest must not overwrite a user-provided digest.
+sed '/^MIHOMO_FALLBACK_SHA256=/d' "$pins_dir/old.env" > "$pins_dir/config.env"
+printf "MIHOMO_SHA256='custom-checksum'\n" >> "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-mihomo=v1.19.31|.*|custom-checksum|.*04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc$' "$pins_dir/output.log"
+
 monitor_dir="$(make_fixture monitor-only)"
 cat > "$monitor_dir/config.env" <<'EOF'
 MIHOMO_ENABLED='0'
@@ -210,7 +324,7 @@ MONITOR_ENDPOINT='https://worker.example.com/update'
 MONITOR_TOKEN='test-secret'
 MONITOR_AGENT_ID='server-id'
 MONITOR_REMOTE_CONTROL='false'
-MONITOR_VERSION='v1.0.18'
+MONITOR_VERSION='v1.0.19'
 MONITOR_URL='https://example.invalid/cf-probe-linux-amd64'
 CFSM_COLLECT_INTERVAL='2'
 CFSM_REPORT_INTERVAL='60'
@@ -235,16 +349,19 @@ assert_contains '^PING_MODE=icmp$' "$cfsm_dir/config/cfsm.conf"
 assert_contains '^AUTO_UPDATE=0$' "$cfsm_dir/config/cfsm.conf"
 
 # A changed version/SHA/URL must replace a previously installed monitor binary.
-monitor_update_dir="$(make_fixture monitor-update)"
+for monitor_type in lite komari cfsm; do
+monitor_update_dir="$(make_fixture "monitor-update-$monitor_type")"
 mkdir -p "$monitor_update_dir/assets"
 cat > "$monitor_update_dir/assets/lite-v1" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${1:-}" == '--help' ]]; then exit 0; fi
 printf 'monitor fixture v1\n'
 trap 'exit 0' TERM INT
 while true; do sleep 1; done
 EOF
 cat > "$monitor_update_dir/assets/lite-v2" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${1:-}" == '--help' ]]; then exit 0; fi
 printf 'monitor fixture v2\n'
 trap 'exit 0' TERM INT
 while true; do sleep 1; done
@@ -255,7 +372,8 @@ monitor_v2_sha="$(sha256sum "$monitor_update_dir/assets/lite-v2" | awk '{print $
 cat > "$monitor_update_dir/config.env" <<EOF
 MIHOMO_ENABLED='0'
 MONITOR_ENABLED='1'
-MONITOR_TYPE='lite'
+MONITOR_TYPE='$monitor_type'
+MONITOR_AGENT_ID='fixture-id'
 MONITOR_ENDPOINT='https://lite.example.com'
 MONITOR_TOKEN='test-token'
 MONITOR_REMOTE_CONTROL='false'
@@ -268,7 +386,8 @@ assert_contains 'monitor fixture v1' "$monitor_update_dir/logs/monitor.log"
 cat > "$monitor_update_dir/config.env" <<EOF
 MIHOMO_ENABLED='0'
 MONITOR_ENABLED='1'
-MONITOR_TYPE='lite'
+MONITOR_TYPE='$monitor_type'
+MONITOR_AGENT_ID='fixture-id'
 MONITOR_ENDPOINT='https://lite.example.com'
 MONITOR_TOKEN='test-token'
 MONITOR_REMOTE_CONTROL='false'
@@ -281,8 +400,37 @@ EOF
     cd() { sleep 0.3; builtin cd "$@"; }
     run_for_startup "$monitor_update_dir" env
 )
-assert_contains 'Monitor Agent installed (lite fixture-v2)' "$monitor_update_dir/output.log"
+assert_contains "Monitor Agent installed ($monitor_type fixture-v2)" "$monitor_update_dir/output.log"
 assert_contains 'monitor fixture v2' "$monitor_update_dir/logs/monitor.log"
+cp "$monitor_update_dir/data/monitor-$monitor_type.install-state" "$monitor_update_dir/installed.state"
+run_for_startup "$monitor_update_dir" env
+if grep -q 'Downloading:' "$monitor_update_dir/output.log"; then
+    printf 'unchanged monitor spec downloaded again: %s\n' "$monitor_type" >&2
+    exit 1
+fi
+# A failed replacement must keep both the old binary and its old metadata,
+# otherwise the next launch would incorrectly consider the update installed.
+printf "MONITOR_VERSION='fixture-v3'\nMONITOR_SHA256='%064d'\n" 0 >> "$monitor_update_dir/config.env"
+for _ in 1 2; do
+    run_for_startup "$monitor_update_dir" env
+    assert_contains 'Monitor update failed; continuing with the existing binary' "$monitor_update_dir/output.log"
+    assert_contains 'monitor fixture v2' "$monitor_update_dir/logs/monitor.log"
+    cmp "$monitor_update_dir/installed.state" "$monitor_update_dir/data/monitor-$monitor_type.install-state"
+done
+printf "MONITOR_URL='%s'\n" "$(file_url "$monitor_update_dir/assets/missing")" >> "$monitor_update_dir/config.env"
+run_for_startup "$monitor_update_dir" env
+assert_contains 'Monitor update failed; continuing with the existing binary' "$monitor_update_dir/output.log"
+cmp "$monitor_update_dir/installed.state" "$monitor_update_dir/data/monitor-$monitor_type.install-state"
+# Even a checksummed asset may be incompatible with this host.
+printf '#!/usr/bin/env bash\nexit 126\n' > "$monitor_update_dir/assets/unusable"
+printf "MONITOR_URL='%s'\nMONITOR_SHA256='%s'\n" \
+    "$(file_url "$monitor_update_dir/assets/unusable")" \
+    "$(sha256sum "$monitor_update_dir/assets/unusable" | awk '{print $1}')" >> "$monitor_update_dir/config.env"
+run_for_startup "$monitor_update_dir" env
+assert_contains 'Downloaded Monitor Agent failed its smoke test; continuing with the existing binary' "$monitor_update_dir/output.log"
+assert_contains 'monitor fixture v2' "$monitor_update_dir/logs/monitor.log"
+cmp "$monitor_update_dir/installed.state" "$monitor_update_dir/data/monitor-$monitor_type.install-state"
+done
 
 proxy_dir="$(make_fixture proxy-only)"
 cat > "$proxy_dir/config.env" <<'EOF'
@@ -292,7 +440,7 @@ EOF
 cat > "$proxy_dir/bin/mihomo" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "-v" ]]; then
-    printf 'Mihomo Meta v1.19.31\n'
+    printf 'Mihomo Meta v1.19.32\n'
     exit 0
 fi
 if [[ "${1:-}" == "generate" && "${2:-}" == "reality-keypair" ]]; then
@@ -382,6 +530,24 @@ EOF
 run_for_startup "$mihomo_update_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
 assert_contains 'Mihomo install metadata changed; downloading fixture-v2' "$mihomo_update_dir/output.log"
 assert_contains 'Mihomo Meta fixture-v2' "$mihomo_update_dir/output.log"
+cp "$mihomo_update_dir/data/mihomo.install-state" "$mihomo_update_dir/installed.state"
+run_for_startup "$mihomo_update_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
+if grep -q 'Downloading:' "$mihomo_update_dir/output.log"; then
+    printf 'unchanged Mihomo spec downloaded again\n' >&2
+    exit 1
+fi
+printf "MIHOMO_VERSION='fixture-v3'\nMIHOMO_SHA256='%064d'\nMIHOMO_FALLBACK_SHA256='%064d'\n" 0 0 >> "$mihomo_update_dir/config.env"
+for _ in 1 2; do
+    run_for_startup "$mihomo_update_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
+    assert_contains 'Mihomo update failed; continuing with the existing binary' "$mihomo_update_dir/output.log"
+    assert_contains 'mihomo fixture fixture-v2' "$mihomo_update_dir/logs/mihomo.log"
+    cmp "$mihomo_update_dir/installed.state" "$mihomo_update_dir/data/mihomo.install-state"
+done
+# Primary checksum failure must still permit a valid compatible build.
+printf "MIHOMO_FALLBACK_SHA256='%s'\n" "$mihomo_v2_sha" >> "$mihomo_update_dir/config.env"
+run_for_startup "$mihomo_update_dir" env SERVER_IP=192.0.2.1 SERVER_PORT=443
+assert_contains 'trying compatible build' "$mihomo_update_dir/output.log"
+assert_contains 'Mihomo installed:' "$mihomo_update_dir/output.log"
 
 both_dir="$(make_fixture both-services)"
 cat > "$both_dir/config.env" <<'EOF'
@@ -444,7 +610,7 @@ mihomo_watchdog_dir="$(make_fixture mihomo-watchdog)"
 cat > "$mihomo_watchdog_dir/config.env" <<'EOF'
 MIHOMO_ENABLED='1'
 MONITOR_ENABLED='0'
-MIHOMO_VERSION='v1.19.31'
+MIHOMO_VERSION='v1.19.32'
 MIHOMO_SHA256=''
 MIHOMO_FALLBACK_SHA256=''
 WATCHDOG_BASE_DELAY_SECONDS='0'
@@ -452,7 +618,7 @@ WATCHDOG_STABLE_SECONDS='9999'
 EOF
 cat > "$mihomo_watchdog_dir/bin/mihomo" <<'EOF'
 #!/usr/bin/env bash
-if [[ "${1:-}" == "-v" ]]; then printf 'Mihomo Meta v1.19.31\n'; exit 0; fi
+if [[ "${1:-}" == "-v" ]]; then printf 'Mihomo Meta v1.19.32\n'; exit 0; fi
 if [[ "${1:-}" == "generate" && "${2:-}" == "reality-keypair" ]]; then
     printf 'PrivateKey: test-private-key\nPublicKey: test-public-key\n'
     exit 0
