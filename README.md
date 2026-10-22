@@ -48,6 +48,8 @@ The optional renewal job checks the current ACLClouds service periodically and r
 
 No separate GitHub Actions workflow or extra server is required. The renewal helper runs directly inside the current Bot.
 
+The helper refreshes CSRF cookies before login and retries a CSRF-rejected request once. Renewal is reported as successful only when valid expiry timestamps confirm an extension; payment/checkouts or unverifiable results require attention and never trigger an automatic payment or an immediate replay of a successful request.
+
 ### Automatic Updates
 
 By default, Toolkit follows stable releases published on GitHub.

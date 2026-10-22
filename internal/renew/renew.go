@@ -73,9 +73,13 @@ func Check(ctx context.Context, config Config) (Result, error) {
 			return fail(ctx, config, errors.New("ACLClouds session is still unauthorized after login"))
 		}
 	}
-	if err := s.saveAuthState(config.AuthStatePath); err != nil {
-		log.Printf("[renew] WARNING: %v", err)
-	}
+	// Renewal/CSRF refresh may rotate cookies after the initial list request.
+	// Persist the final jar, including when confirmation remains uncertain.
+	defer func() {
+		if err := s.saveAuthState(config.AuthStatePath); err != nil {
+			log.Printf("[renew] WARNING: %v", err)
+		}
+	}()
 
 	target, err := selectServer(servers, config.ServerSelector)
 	if err != nil {
@@ -93,9 +97,6 @@ func Check(ctx context.Context, config Config) (Result, error) {
 		log.Print("[renew] Session expired during renewal; logging in again")
 		if err := s.login(ctx, config.Username, config.Password); err != nil {
 			return fail(ctx, config, err)
-		}
-		if err := s.saveAuthState(config.AuthStatePath); err != nil {
-			log.Printf("[renew] WARNING: %v", err)
 		}
 		result, err = s.renew(ctx, target)
 	}
@@ -227,6 +228,39 @@ func (s *session) renew(ctx context.Context, target server) (Result, error) {
 }
 
 func (s *session) confirmRenewal(ctx context.Context, target server, renewBody []byte) (Result, error) {
+	var response map[string]any
+	if json.Unmarshal(renewBody, &response) != nil || response == nil {
+		return Result{}, fmt.Errorf("cannot confirm renewal of %s: response is not a JSON object", target.displayName())
+	}
+	responseObjects := []map[string]any{response}
+	if wrapped, ok := response["data"].(map[string]any); ok {
+		responseObjects = append(responseObjects, wrapped)
+	}
+	for _, object := range responseObjects {
+		payment := boolPointer(object, "requires_payment")
+		if (payment != nil && *payment) || stringValue(object, "checkout_url") != "" {
+			// Do not open a checkout, follow its URL, or include that private
+			// URL in logs/Telegram. Payment is never an automatic renewal.
+			return Result{}, fmt.Errorf("renew %s requires payment; manual action is needed", target.displayName())
+		}
+		success := boolPointer(object, "success")
+		failed := success != nil && !*success
+		for _, key := range []string{"error", "errors"} {
+			switch value := object[key].(type) {
+			case string:
+				failed = failed || strings.TrimSpace(value) != ""
+			case bool:
+				failed = failed || value
+			case []any:
+				failed = failed || len(value) != 0
+			case map[string]any:
+				failed = failed || len(value) != 0
+			}
+		}
+		if failed {
+			return Result{}, fmt.Errorf("server did not confirm renewal of %s", target.displayName())
+		}
+	}
 	newExpiry := expirationFromBody(renewBody)
 	path := "/api/client/servers/" + url.PathEscape(target.Identifier)
 	detail, err := s.request(ctx, http.MethodGet, path, nil)
@@ -235,17 +269,18 @@ func (s *session) confirmRenewal(ctx context.Context, target server, renewBody [
 			newExpiry = expiry
 		}
 	}
-	if target.ExpiresAt != "" && newExpiry != "" {
-		before, beforeErr := time.Parse(time.RFC3339, target.ExpiresAt)
-		after, afterErr := time.Parse(time.RFC3339, newExpiry)
-		if beforeErr == nil && afterErr == nil && !after.After(before) {
-			return Result{}, fmt.Errorf("renew %s returned success but expires_at did not advance (%s)", target.displayName(), newExpiry)
-		}
+	before, beforeErr := time.Parse(time.RFC3339, target.ExpiresAt)
+	after, afterErr := time.Parse(time.RFC3339, newExpiry)
+	if beforeErr != nil || afterErr != nil {
+		// A 200/message alone is not evidence of an extension. Do not signal
+		// errSessionExpired here: the POST may already have succeeded, so
+		// confirmation failure must not trigger re-login and another POST.
+		return Result{}, fmt.Errorf("cannot confirm renewal of %s: previous or new expires_at is missing or invalid", target.displayName())
 	}
-	if newExpiry != "" {
-		return Result{Renewed: true, Message: "新到期时间：" + newExpiry}, nil
+	if !after.After(before) {
+		return Result{}, fmt.Errorf("renew %s returned success but expires_at did not advance (%s)", target.displayName(), newExpiry)
 	}
-	return Result{Renewed: true, Message: renewalMessage(renewBody)}, nil
+	return Result{Renewed: true, Message: "新到期时间：" + newExpiry}, nil
 }
 
 func (s server) displayName() string {
@@ -261,16 +296,6 @@ func renewalNotAvailable(result httpResult) bool {
 	}
 	body := strings.ToLower(string(result.Body))
 	return strings.Contains(body, "renewal_not_available")
-}
-
-func renewalMessage(body []byte) string {
-	var data map[string]any
-	if json.Unmarshal(body, &data) == nil {
-		if message := stringValue(data, "message"); message != "" {
-			return message
-		}
-	}
-	return "服务端已确认续期"
 }
 
 func expirationFromBody(body []byte) string {

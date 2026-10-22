@@ -32,7 +32,8 @@ func TestCheckRenewsMatchingCurrentServiceAndNotifies(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{
 				map[string]any{"object": "server", "attributes": map[string]any{
 					"identifier": "real-id", "uuid": "full-uuid", "name": "My Bot",
-					"can_renew": true, "auto_renew": false, "free_renewals_remaining": 1,
+					"expires_at": "2026-09-27T00:00:00Z",
+					"can_renew":  true, "auto_renew": false, "free_renewals_remaining": 1,
 				}},
 			}})
 		case r.URL.Path == "/api/client/servers/real-id/upgrade/renew":
@@ -300,6 +301,7 @@ func TestRenewalLogsInAgainWhenTheSessionExpiresMidway(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{
 				map[string]any{"object": "server", "attributes": map[string]any{
 					"identifier": "real-id", "uuid": "full-uuid", "can_renew": true,
+					"expires_at": "2026-09-27T00:00:00Z",
 				}},
 			}})
 		case r.URL.Path == "/auth/login" && r.Method == http.MethodGet:

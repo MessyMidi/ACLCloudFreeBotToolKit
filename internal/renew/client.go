@@ -31,6 +31,8 @@ const maxResponseBytes = 2 << 20
 
 var csrfMetaPattern = regexp.MustCompile(`(?i)<meta\s+name=["']csrf-token["']\s+content=["']([^"']+)["']`)
 
+var errCSRFEndpointUnavailable = errors.New("CSRF cookie endpoint is unavailable")
+
 type session struct {
 	baseURL       *url.URL
 	client        *http.Client
@@ -88,6 +90,30 @@ func (s *session) endpoint(path string) string {
 }
 
 func (s *session) request(ctx context.Context, method, path string, payload any) (httpResult, error) {
+	result, err := s.requestOnce(ctx, method, path, payload)
+	if err != nil || result.Status != statusPageExpired {
+		return result, err
+	}
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		// Laravel rejects CSRF failures before the action runs. Refresh the
+		// current session's cookies, then replay the same payload only once.
+		// Never replay a timeout, a 5xx response, or a confirmation failure.
+		if refreshErr := s.refreshCSRF(ctx); refreshErr != nil {
+			if ctx.Err() != nil {
+				return httpResult{}, ctx.Err()
+			}
+			// Preserve the original 419 so the existing re-login fallback can
+			// handle expired sessions and older panels without Sanctum.
+			return result, nil
+		}
+		return s.requestOnce(ctx, method, path, payload)
+	default:
+		return result, nil
+	}
+}
+
+func (s *session) requestOnce(ctx context.Context, method, path string, payload any) (httpResult, error) {
 	var body io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -143,12 +169,34 @@ func (s *session) openLogin(ctx context.Context) error {
 	if result.Status != http.StatusOK {
 		return fmt.Errorf("open login page: HTTP %d", result.Status)
 	}
+	s.csrfToken = ""
 	if match := csrfMetaPattern.FindSubmatch(result.Body); len(match) == 2 {
 		s.csrfToken = html.UnescapeString(string(match[1]))
+	}
+	if err := s.refreshCSRF(ctx); err != nil && !errors.Is(err, errCSRFEndpointUnavailable) {
+		return err
 	}
 	if s.xsrfToken() == "" && s.csrfToken == "" {
 		return errors.New("login page did not provide an XSRF or CSRF token")
 	}
+	return nil
+}
+
+func (s *session) refreshCSRF(ctx context.Context) error {
+	result, err := s.requestOnce(ctx, http.MethodGet, "/sanctum/csrf-cookie", nil)
+	if err != nil {
+		return fmt.Errorf("refresh CSRF cookies: %w", err)
+	}
+	if result.Status == http.StatusNotFound || result.Status == http.StatusMethodNotAllowed {
+		return errCSRFEndpointUnavailable
+	}
+	if result.Status != http.StatusOK && result.Status != http.StatusNoContent {
+		return fmt.Errorf("refresh CSRF cookies: HTTP %d", result.Status)
+	}
+	if s.xsrfToken() == "" {
+		return errors.New("CSRF cookie endpoint did not provide an XSRF token")
+	}
+	s.csrfToken = ""
 	return nil
 }
 
