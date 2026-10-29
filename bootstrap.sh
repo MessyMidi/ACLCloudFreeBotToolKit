@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-BOOTSTRAP_VERSION='0.7.4'
+BOOTSTRAP_VERSION='0.7.5'
 SUPPORTED_CONFIG_SCHEMA_VERSION=2
 DEFAULT_UPDATE_BASE_URL='https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/latest/download'
 DEFAULT_RELEASES_API_URL='https://api.github.com/repos/MessyMidi/ACLCloudFreeBotToolKit/releases?per_page=20'
@@ -39,9 +39,21 @@ REJECTED_UPDATE_TTL=604800
 LOG_DIR="$BASE_DIR/logs"
 RENEW_LOG="$LOG_DIR/renew.log"
 
-log()  { printf '[bootstrap] %s\n' "$*"; }
-warn() { printf '[bootstrap] WARNING: %s\n' "$*" >&2; }
-die()  { printf '[bootstrap] ERROR: %s\n' "$*" >&2; exit 1; }
+mkdir -p "$LOG_DIR"
+# Keep diagnostics even before a launcher starts, without saving Console
+# input, proxy links, config contents, or child environments.
+record_bootstrap_log() {
+    local file="$LOG_DIR/bootstrap.log" temporary="$LOG_DIR/bootstrap.log.tmp.$$"
+    printf '%s [bootstrap] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$file" || return 0
+    if (( $(wc -c < "$file") > 1048576 )); then
+        tail -c 524288 "$file" > "$temporary" && mv -f "$temporary" "$file"
+    fi
+    return 0
+}
+log()  { printf '[bootstrap] %s\n' "$*"; record_bootstrap_log "$*"; }
+warn() { printf '[bootstrap] WARNING: %s\n' "$*" >&2; record_bootstrap_log "WARNING: $*"; }
+die()  { printf '[bootstrap] ERROR: %s\n' "$*" >&2; record_bootstrap_log "ERROR: $*"; exit 1; }
+trap 'record_bootstrap_log "ERROR: command failed at line $LINENO (exit $?)"' ERR
 
 atomic_copy() {
     local source="$1"
@@ -480,10 +492,10 @@ if [[ -n "$INTERNAL_MIGRATE_FILE" ]]; then
     exit 0
 fi
 
-find_latest_prerelease_tag() {
+find_latest_channel_release_tag() {
     local releases_file="$1"
     local fields="${releases_file}.fields"
-    local line tag='' draft='' prerelease=''
+    local line tag='' draft=''
 
     # Put every JSON member on its own line so the scan below reads both the
     # pretty-printed and the minified form of the API response.
@@ -492,7 +504,6 @@ find_latest_prerelease_tag() {
         if [[ "$line" =~ \"tag_name\"[[:space:]]*:[[:space:]]*\"([A-Za-z0-9._-]+)\" ]]; then
             tag="${BASH_REMATCH[1]}"
             draft=''
-            prerelease=''
             continue
         fi
         [[ -n "$tag" ]] || continue
@@ -501,16 +512,12 @@ find_latest_prerelease_tag() {
             continue
         fi
         if [[ "$line" =~ \"prerelease\"[[:space:]]*:[[:space:]]*(true|false) ]]; then
-            prerelease="${BASH_REMATCH[1]}"
             if [[ "$draft" == 'false' ]]; then
-                if [[ "$prerelease" == 'true' ]]; then
-                    printf '%s\n' "$tag"
-                    return 0
-                fi
-                # GitHub returns releases newest first. Once the newest
-                # published release is Stable, older prereleases must not
-                # replace it and accidentally downgrade a test container.
-                return 1
+                # The preview channel follows both release kinds. When a
+                # preview graduates to Stable, preview users must upgrade too.
+                # Never select an older preview past the newest Stable entry.
+                printf '%s\n' "$tag"
+                return 0
             fi
             tag=''
         fi
@@ -536,12 +543,12 @@ resolve_update_base_url() {
         warn 'Prerelease metadata is unavailable; continuing with local files'
         return 1
     fi
-    if ! tag="$(find_latest_prerelease_tag "$releases_file")"; then
-        warn 'No active prerelease newer than the latest Stable release was found; continuing with local files'
+    if ! tag="$(find_latest_channel_release_tag "$releases_file")"; then
+        warn 'No published release was found for the prerelease channel; continuing with local files'
         return 1
     fi
     UPDATE_BASE_URL="${RELEASE_DOWNLOAD_BASE_URL%/}/$tag"
-    log "Selected prerelease $tag"
+    log "Selected prerelease-channel release $tag"
 }
 
 prepare_update() {
@@ -810,6 +817,14 @@ schedule_next_update() {
     NEXT_UPDATE_AT=$((SECONDS + UPDATE_INTERVAL + jitter))
 }
 
+check_scheduled_update() {
+    [[ "$AUTO_UPDATE_MODE" == 'enable' && "$UPDATE_INTERVAL" -gt 0 && "$SECONDS" -ge "$NEXT_UPDATE_AT" ]] || return 0
+    if prepare_update; then
+        apply_update "$STAGED_UPDATE_DIR"
+    fi
+    schedule_next_update
+}
+
 renew_is_enabled() {
     local config_file
     config_file="$(find_config_file)" || return 1
@@ -942,6 +957,7 @@ ensure_running_launcher() {
 }
 
 pending_backup=''
+schedule_next_update
 if pending_backup="$(read_pending_backup)"; then
     config_file="$(find_config_file)" || restore_update_backup "$pending_backup"
     if ! migrate_config "$config_file" || ! ensure_running_launcher 2; then
@@ -962,6 +978,7 @@ else
 
     restart_delay=2
     until ensure_running_launcher "$restart_delay"; do
+        check_scheduled_update
         (( restart_delay < 30 )) && restart_delay=$((restart_delay * 2))
         (( restart_delay > 30 )) && restart_delay=30
     done
@@ -978,6 +995,7 @@ while [[ "$SHUTTING_DOWN" -eq 0 ]]; do
         warn "Launcher exited unexpectedly; restarting in ${restart_delay}s"
         sleep "$restart_delay"
         until ensure_running_launcher "$restart_delay"; do
+            check_scheduled_update
             (( restart_delay < 30 )) && restart_delay=$((restart_delay * 2))
             (( restart_delay > 30 )) && restart_delay=30
         done
@@ -993,11 +1011,6 @@ while [[ "$SHUTTING_DOWN" -eq 0 ]]; do
         start_renew_check
     fi
 
-    if [[ "$AUTO_UPDATE_MODE" == 'enable' && "$UPDATE_INTERVAL" -gt 0 && "$SECONDS" -ge "$NEXT_UPDATE_AT" ]]; then
-        if prepare_update; then
-            apply_update "$STAGED_UPDATE_DIR"
-        fi
-        schedule_next_update
-    fi
+    check_scheduled_update
     sleep 1
 done

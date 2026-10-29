@@ -47,7 +47,7 @@ jobs:
 
       - name: Check shell syntax
         run: |
-          for script in bootstrap.sh launcher.sh tests/bootstrap.test.sh tests/launcher-modes.test.sh tests/launcher-console.test.sh; do
+          for script in bootstrap.sh launcher.sh tests/bootstrap.test.sh tests/launcher-modes.test.sh tests/launcher-console.test.sh tests/startup-diagnostics.test.sh; do
             bash -n "$script"
           done
 
@@ -82,6 +82,9 @@ jobs:
 
       - name: Test Console log views
         run: bash tests/launcher-console.test.sh
+
+      - name: Test early startup diagnostics
+        run: bash tests/startup-diagnostics.test.sh
 
       - name: Build release assets
         run: npm run build

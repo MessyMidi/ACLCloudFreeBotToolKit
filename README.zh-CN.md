@@ -21,7 +21,7 @@
 5. 将生成的 Startup Command 粘贴到 ACLClouds 的 **Startup** 页面。
 6. 启动或重启 Bot。
 
-`SERVER_IP` 和 `SERVER_PORT` 会由 ACLClouds 自动注入，不需要手动填写。
+`SERVER_IP` 和 `SERVER_PORT` 通常由 ACLClouds 自动注入。如果面板地址显示 `n/a`，请检查分配地址/Startup 设置或联系 ACLClouds。Mihomo 必须有已分配的 `SERVER_PORT`；缺少 `SERVER_IP` 时仍可监听，但暂不生成分享链接。确认分配信息后，也可在 `config.env` 中填写 `SERVER_IP` 为其公网地址。仅运行探针或延期时，两者都不需要。
 
 第一次启动会下载所需的运行文件。之后生成的 VLESS 参数、认证状态等数据都会保存在容器内，请妥善保管，**不要与非可信赖个体分享这些账号或凭据**。
 
@@ -45,14 +45,14 @@
 可选的自动延期任务会定期检查当前 ACLClouds 服务，在进入可延期状态后自动完成延期。延期任务负责判断是否可以延期，并处理验证和失败重试；Telegram 通知可按需开启。
 不需要额外运行 GitHub Actions 或另一台服务器，延期程序直接运行在当前 Bot 中。
 
-程序会在登录前刷新 CSRF Cookie，并对 CSRF 校验拒绝的请求重试一次。只有有效的到期时间确认延长后才报告延期成功；需要付费或无法确认的结果会提示处理，不会自动付款，也不会因确认失败立即重发已返回成功的延期请求。
-
 ### 自动更新
 
 默认情况下，Toolkit 会自动跟随 GitHub 上发布的稳定版本。
 更新时会下载对应 Release 中的运行文件，并使用同一 Release 提供的 `SHA256SUMS` 进行校验。
 如果新版本在切换或启动阶段出现问题，会自动恢复到之前可以正常运行的版本，而不是让整个 Bot 因为一次坏更新直接下线。
 如果不希望自动更新，可在配置生成器中关闭，或将 Startup Command 中的 `--AUTO_UPDATE=enable` 改为 `--AUTO_UPDATE=disable`，然后重启 Bot。
+
+launcher 启动失败重试期间仍按原有周期检查更新，以便获取修复。旧 bootstrap 可能无法在启动失败后进入定时检查，需要重启或替换旧 bootstrap 才能获得这项修复。再次尝试前请保留日志。
 
 Mihomo 和探针使用 Toolkit 选定并校验 SHA256 的固定版本，不启用上游自更新。新 launcher 也会升级上一版 Toolkit 生成的完整官方版本组合（Mihomo `v1.19.31`、Lite `2.3.3.5`、CFSM `v1.0.18`）；自定义或不完整的版本、URL、校验值组合保持不动。如需连旧官方版本也保持固定，可在 `config.env` 添加 `RUNTIME_VERSIONS_PINNED='1'`。该过程不会改写配置文件。launcher 启动时会按变化后的安装规格替换缓存；下载或校验失败则保留已有程序，下次启动重试。
 
@@ -65,6 +65,8 @@ Mihomo 和探针使用 Toolkit 选定并校验 SHA256 的固定版本，不启�
 启动完成后，可以直接在 ACLClouds Console 中使用菜单查看：当前服务状态、Mihomo/探针/自动延期日志等
 
 日志页默认显示最近三次延期检查的完整记录，Mihomo/探针则显示最后 20 行日志。在日志页输入 `1` 可输出全部已保留日志，输入 `0` 返回上级并打印主菜单。因大小限制清理过的历史日志无法显示。
+
+启动、更新和重试信息分别保存在 `logs/bootstrap.log` 与 `logs/launcher.log`，包括子服务日志创建前发生的错误。日志跨重启保留，超过 1 MiB 时截取最近 512 KiB。如果运行目录不可写，错误仍只能显示在 Console。
 
 ---
 

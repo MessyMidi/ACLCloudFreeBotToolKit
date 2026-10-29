@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-LAUNCHER_VERSION='0.7.4'
+LAUNCHER_VERSION='0.7.5'
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$BASE_DIR/bin"
@@ -33,9 +33,30 @@ MIHOMO_INSTALL_STATE="$DATA_DIR/mihomo.install-state"
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR" "$MIHOMO_HOME"
 
-log()  { printf '[launcher] %s\n' "$*"; }
-warn() { printf '[launcher] WARNING: %s\n' "$*" >&2; }
-die()  { printf '[launcher] ERROR: %s\n' "$*" >&2; exit 1; }
+# Persist supervisor messages before configuration validation. Never tee the
+# Console: it also prints VLESS credentials and user-requested service logs.
+record_launcher_log() {
+    local file="$LOG_DIR/launcher.log" temporary="$LOG_DIR/launcher.log.tmp.$$"
+    printf '%s [launcher] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$file" || return 0
+    if (( $(wc -c < "$file") > 1048576 )); then
+        tail -c 524288 "$file" > "$temporary" && mv -f "$temporary" "$file"
+    fi
+    return 0
+}
+log()  { printf '[launcher] %s\n' "$*"; record_launcher_log "$*"; }
+warn() { printf '[launcher] WARNING: %s\n' "$*" >&2; record_launcher_log "WARNING: $*"; }
+die()  { printf '[launcher] ERROR: %s\n' "$*" >&2; record_launcher_log "ERROR: $*"; exit 1; }
+# Do not record BASH_COMMAND or variable values, which may contain credentials.
+trap 'record_launcher_log "ERROR: command failed at line $LINENO (exit $?)"' ERR
+# Bash expansion errors (including unset required variables) bypass ERR.
+# This early trap is replaced by service cleanup once startup has progressed.
+record_startup_exit() {
+    local status=$?
+    if (( status != 0 )); then
+        record_launcher_log "ERROR: startup exited with status $status; inspect Console for the original shell diagnostic"
+    fi
+}
+trap record_startup_exit EXIT
 
 # ACLClouds' file manager does not conveniently create a bare ".env".
 # Prefer config.env, but keep .env compatibility.
@@ -255,9 +276,12 @@ valid_destination() {
     die "At least one of Mihomo, Monitor, or automatic renewal must be enabled"
 
 if [[ "$MIHOMO_ENABLED" == "1" ]]; then
-    : "${SERVER_IP:?ACLClouds did not provide SERVER_IP}"
-    : "${SERVER_PORT:?ACLClouds did not provide SERVER_PORT}"
+    SERVER_IP="${SERVER_IP:-}"
+    [[ -n "${SERVER_PORT:-}" ]] || die "SERVER_PORT is missing; check the panel allocation/Startup settings. If the panel address is n/a, contact ACLClouds to restore an allocation; no port can be inferred safely"
     valid_port "$SERVER_PORT" || die "SERVER_PORT is not a valid port: $SERVER_PORT"
+    if [[ -z "$SERVER_IP" ]]; then
+        warn 'SERVER_IP is missing; listening on SERVER_PORT, but the public address is unavailable. Check the panel allocation; proxy links will be withheld'
+    fi
     [[ "$REALITY_SNI" =~ ^[A-Za-z0-9._-]+$ ]] || die "REALITY_SNI contains unsupported characters"
     valid_destination "$REALITY_DEST" || die "REALITY_DEST must be host:port, or [address]:port for IPv6"
     [[ "$CLIENT_FINGERPRINT" =~ ^[A-Za-z0-9._-]+$ ]] || die "CLIENT_FINGERPRINT contains unsupported characters"
@@ -983,6 +1007,11 @@ show_link() {
         return
     fi
 
+    if [[ -z "$SERVER_IP" ]]; then
+        printf '\nProxy link unavailable: public address is unavailable. Restore the panel allocation, or set SERVER_IP to its confirmed public address in config.env and restart.\n\n'
+        return
+    fi
+
     printf '\n'
     printf '%s\n' '================ VLESS + REALITY ================'
     vless_link
@@ -1024,7 +1053,7 @@ show_status() {
     fi
 
     if [[ "$MIHOMO_ENABLED" == "1" ]]; then
-        printf 'Server : %s:%s\n' "$SERVER_IP" "$SERVER_PORT"
+        printf 'Server : %s:%s\n' "${SERVER_IP:-[public address unavailable]}" "$SERVER_PORT"
     fi
 
     if [[ "$RENEW_ENABLED" == "1" ]]; then

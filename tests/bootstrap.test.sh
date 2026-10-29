@@ -356,7 +356,7 @@ EOF
         bash bootstrap.sh --AUTO_UPDATE=enable </dev/null >output.log 2>&1
 ) &
 prerelease_pid=$!
-if ! wait_for_pattern "Selected prerelease $prerelease_tag" "$prerelease_server/output.log" || \
+if ! wait_for_pattern "Selected prerelease-channel release $prerelease_tag" "$prerelease_server/output.log" || \
    ! wait_for_pattern 'Updated launcher reported ready' "$prerelease_server/output.log"; then
     printf 'bootstrap did not install from the prerelease channel\n' >&2
     cat "$prerelease_server/output.log" >&2 || true
@@ -367,13 +367,24 @@ fi
 kill -TERM "$prerelease_pid" 2>/dev/null || true
 wait "$prerelease_pid" 2>/dev/null || true
 assert_contains 'Checking prerelease channel for updates' "$prerelease_server/output.log"
+assert_contains 'Selected prerelease-channel release' "$prerelease_server/logs/bootstrap.log"
 
-# A historical prerelease older than the latest Stable release must not cause
-# a downgrade when a tester leaves the hidden channel enabled.
+# A newer Stable must replace the preview, without selecting an older preview
+# farther down the list. Verify the actual installed launcher, not just a log.
+stable_release="$prerelease_root/v0.5.1"
+mkdir -p "$stable_release"
+cp "$PROJECT_DIR/bootstrap.sh" "$stable_release/bootstrap.sh"
+make_release_launcher "$stable_release/launcher.sh"
+printf '\n# stable-graduation-fixture\n' >> "$stable_release/launcher.sh"
+make_release_renew "$stable_release/acl-renew-linux-amd64"
+(
+    cd "$stable_release"
+    sha256sum bootstrap.sh launcher.sh acl-renew-linux-amd64 > SHA256SUMS
+)
 cat > "$TEST_DIR/releases.json" <<'EOF'
 [
   {
-    "tag_name": "v0.5.0",
+    "tag_name": "v0.5.1",
     "draft": false,
     "prerelease": false
   },
@@ -396,9 +407,9 @@ EOF
         bash bootstrap.sh --AUTO_UPDATE=enable </dev/null >no-downgrade.log 2>&1
 ) &
 no_downgrade_pid=$!
-if ! wait_for_pattern 'No active prerelease newer than the latest Stable release' "$prerelease_server/no-downgrade.log" || \
-   ! wait_for_pattern '^change this part$' "$prerelease_server/no-downgrade.log"; then
-    printf 'prerelease channel did not preserve the newer local Stable-compatible files\n' >&2
+if ! wait_for_pattern 'Selected prerelease-channel release v0.5.1' "$prerelease_server/no-downgrade.log" || \
+   ! wait_for_pattern 'Updated launcher reported ready' "$prerelease_server/no-downgrade.log"; then
+    printf 'prerelease channel did not graduate to the newer Stable release\n' >&2
     cat "$prerelease_server/no-downgrade.log" >&2 || true
     kill -TERM "$no_downgrade_pid" 2>/dev/null || true
     wait "$no_downgrade_pid" 2>/dev/null || true
@@ -406,6 +417,11 @@ if ! wait_for_pattern 'No active prerelease newer than the latest Stable release
 fi
 kill -TERM "$no_downgrade_pid" 2>/dev/null || true
 wait "$no_downgrade_pid" 2>/dev/null || true
+cmp "$stable_release/launcher.sh" "$prerelease_server/launcher.sh"
+assert_contains 'stable-graduation-fixture' "$prerelease_server/launcher.sh"
+if grep -q 'Selected prerelease-channel release v0.4.1-pre1' "$prerelease_server/no-downgrade.log"; then
+    printf 'an older preview replaced the newer Stable release\n' >&2; exit 1
+fi
 
 # A blocked update endpoint must not stop a valid local launcher.
 fallback_dir="$TEST_DIR/fallback"
@@ -515,7 +531,7 @@ wait "$rejected_pid" 2>/dev/null || true
 crash_release="$TEST_DIR/crash-release"
 crash_dir="$TEST_DIR/crash-server"
 mkdir -p "$crash_release" "$crash_dir"
-sed 's/^find_latest_prerelease_tag() {$/exit 42\n&/' "$PROJECT_DIR/bootstrap.sh" > "$crash_release/bootstrap.sh"
+sed 's/^find_latest_channel_release_tag() {$/exit 42\n&/' "$PROJECT_DIR/bootstrap.sh" > "$crash_release/bootstrap.sh"
 grep -q '^exit 42$' "$crash_release/bootstrap.sh" || { printf 'could not build the crashing bootstrap fixture\n' >&2; exit 1; }
 make_release_launcher "$crash_release/launcher.sh"
 make_release_renew "$crash_release/acl-renew-linux-amd64"
