@@ -8,7 +8,7 @@
  */
 
 import './styles.css';
-import { DEFAULT_PROXY, MONITOR_LABELS, TESTED_VERSIONS } from './constants';
+import { BOOTSTRAP_URL, DEFAULT_PROXY, MONITOR_LABELS, TESTED_VERSIONS } from './constants';
 import { generateEnv, generateStartupCommand, validateProxy, validateRenewal } from './generator';
 import { detectLocale, getLocale, isMessageKey, setLocale, t } from './i18n';
 import type { Locale, MessageKey, MessageParams } from './i18n';
@@ -181,7 +181,7 @@ function renderRenewalErrors(errors: ReturnType<typeof validateRenewal>['errors'
 }
 
 function bootstrapUrl(): string {
-  return 'https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/latest/download/bootstrap.sh';
+  return BOOTSTRAP_URL;
 }
 
 function clearGeneratedOutput(status: MessageKey = 'output.changed'): void {

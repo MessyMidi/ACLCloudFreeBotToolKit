@@ -161,5 +161,8 @@ export function generateEnv(monitor?: MonitorConfig, proxy?: ProxyConfig, renewa
 export function generateStartupCommand(bootstrapUrl: string, autoUpdate: boolean): string {
   const quotedUrl = shellQuote(bootstrapUrl);
   const mode = autoUpdate ? 'enable' : 'disable';
-  return `BOOTSTRAP_URL=${quotedUrl}; if [ ! -s bootstrap.sh ] || ! bash -n bootstrap.sh >/dev/null 2>&1; then if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 --connect-timeout 10 -o bootstrap.sh.tmp "$BOOTSTRAP_URL"; else wget -O bootstrap.sh.tmp "$BOOTSTRAP_URL"; fi || exit 1; bash -n bootstrap.sh.tmp || exit 1; mv -f bootstrap.sh.tmp bootstrap.sh; fi; chmod +x bootstrap.sh && exec bash bootstrap.sh --AUTO_UPDATE=${mode}`;
+  // ACLClouds accepts at most 255 characters. b is a fixed, space-free name;
+  // the URL stays quoted. Downloads only replace the cache after validation.
+  // Calling bash directly needs no chmod, and keeps Console stdin attached.
+  return `u=${quotedUrl};b=bootstrap.sh;[ -s $b ]&&bash -n $b||{ (curl -fLo $b.tmp "$u"||wget -O $b.tmp "$u")&&bash -n $b.tmp&&mv $b.tmp $b; }||exit;exec bash $b --AUTO_UPDATE=${mode}`;
 }

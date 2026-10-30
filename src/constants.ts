@@ -9,6 +9,8 @@
 
 import type { MonitorType } from './types';
 
+export const BOOTSTRAP_URL = 'https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/latest/download/bootstrap.sh';
+
 export const MONITOR_LABELS: Record<MonitorType, string> = {
   lite: 'Lite',
   komari: 'Komari',

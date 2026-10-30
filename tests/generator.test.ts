@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { CLIENT_FINGERPRINTS, TESTED_VERSIONS } from '../src/constants';
+import { BOOTSTRAP_URL, CLIENT_FINGERPRINTS, TESTED_VERSIONS } from '../src/constants';
 import { generateEnv, generateStartupCommand, shellQuote, validateProxy, validateRenewal } from '../src/generator';
 import { parseStoredState, renewalForStorage } from '../src/storage';
 
@@ -100,6 +100,13 @@ describe('generateEnv', () => {
   it('can disable bootstrap updates without putting the setting in config.env', () => {
     expect(generateStartupCommand('https://tool.example/bootstrap.sh', false)).toContain('--AUTO_UPDATE=disable');
     expect(generateEnv(monitor, proxy)).not.toContain('AUTO_UPDATE=');
+  });
+
+  it.each([true, false])('fits the platform 255-character startup limit (autoUpdate=%s)', (autoUpdate) => {
+    const command = generateStartupCommand(BOOTSTRAP_URL, autoUpdate);
+    expect(command.length).toBeLessThanOrEqual(255);
+    expect(command).toContain(autoUpdate ? '--AUTO_UPDATE=enable' : '--AUTO_UPDATE=disable');
+    expect(command).toContain('bash -n');
   });
 
   it('generates a proxy-only config without monitor credentials', () => {
