@@ -206,8 +206,8 @@ run_pins() {
 }
 cp "$pins_dir/old.env" "$pins_dir/config.env"
 run_pins
-assert_contains '^resolved-mihomo=v1.19.32|.*306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc.*ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20$' "$pins_dir/output.log"
-assert_contains '^resolved-monitor=2.3.6.0|.*d973b48edba2c1be9faea959c231dc6a278fa40ad283d53a459f8ad7727ef15b$' "$pins_dir/output.log"
+assert_contains '^resolved-mihomo=v1.19.33|.*8ec92e7b2fdc6b853ba00156bab7e4e965c8b0d843b8c4ac8ab98795f02ad524.*386508bfb1c72c43b6a0eda73708ecdce82546581b0ebcb16366c53757c622b6$' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=2.3.10.1|.*b25ce9827b2997bfc96f5e3e957dda52e2f1ea0564b2bd2aca14c6dd38e62562$' "$pins_dir/output.log"
 for field in MIHOMO_VERSION MIHOMO_URL MIHOMO_SHA256 MIHOMO_FALLBACK_URL MIHOMO_FALLBACK_SHA256 MONITOR_VERSION MONITOR_URL MONITOR_SHA256; do
     for value in custom ''; do
         cp "$pins_dir/old.env" "$pins_dir/config.env"
@@ -234,7 +234,7 @@ MONITOR_SHA256='757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa
 EOF
 cp "$pins_dir/config.env" "$pins_dir/cfsm.env"
 run_pins
-assert_contains '^resolved-monitor=v1.0.19|.*64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c$' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=v1.1.1|.*3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714$' "$pins_dir/output.log"
 for field in MONITOR_VERSION MONITOR_URL MONITOR_SHA256; do
     cp "$pins_dir/cfsm.env" "$pins_dir/config.env"
     printf "%s='custom'\n" "$field" >> "$pins_dir/config.env"
@@ -245,6 +245,47 @@ cp "$pins_dir/cfsm.env" "$pins_dir/config.env"
 printf "RUNTIME_VERSIONS_PINNED='1'\n" >> "$pins_dir/config.env"
 run_pins
 assert_contains '^resolved-monitor=v1.0.18|' "$pins_dir/output.log"
+
+# Complete pins from the last Toolkit release follow the new defaults too.
+# These are fixtures, not whatever defaults happen to be in the launcher.
+sed -e 's/v1\.19\.31/v1.19.32/g' \
+    -e 's/d4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114/306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc/g' \
+    -e 's/04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc/ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20/g' \
+    -e 's/2\.3\.3\.5/2.3.6.0/g' \
+    -e 's/c39042e712bd204a5ea359b6d0f0f5b2c3e6bf6fa9bdcd8954e8fad30f32a6ed/d973b48edba2c1be9faea959c231dc6a278fa40ad283d53a459f8ad7727ef15b/g' \
+    "$pins_dir/old.env" > "$pins_dir/recent.env"
+cp "$pins_dir/recent.env" "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-mihomo=v1.19.33|.*8ec92e7b2fdc6b853ba00156bab7e4e965c8b0d843b8c4ac8ab98795f02ad524.*386508bfb1c72c43b6a0eda73708ecdce82546581b0ebcb16366c53757c622b6$' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=2.3.10.1|.*b25ce9827b2997bfc96f5e3e957dda52e2f1ea0564b2bd2aca14c6dd38e62562$' "$pins_dir/output.log"
+cp "$pins_dir/recent.env" "$pins_dir/config.env"
+printf "RUNTIME_VERSIONS_PINNED='1'\n" >> "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-mihomo=v1.19.32|' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=2.3.6.0|' "$pins_dir/output.log"
+sed '/^MIHOMO_SHA256=/d; /^MONITOR_SHA256=/d' "$pins_dir/recent.env" > "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-mihomo=v1.19.32|.*306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=2.3.6.0|.*d973b48edba2c1be9faea959c231dc6a278fa40ad283d53a459f8ad7727ef15b$' "$pins_dir/output.log"
+cp "$pins_dir/recent.env" "$pins_dir/config.env"
+printf "MIHOMO_SHA256='custom-sha'\nMONITOR_SHA256='custom-sha'\n" >> "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-mihomo=v1.19.32|.*|custom-sha|' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=2.3.6.0|.*|custom-sha$' "$pins_dir/output.log"
+
+sed -e 's/v1\.0\.18/v1.0.19/g' \
+    -e 's/757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa/64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c/g' \
+    "$pins_dir/cfsm.env" > "$pins_dir/recent-cfsm.env"
+cp "$pins_dir/recent-cfsm.env" "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-monitor=v1.1.1|.*3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714$' "$pins_dir/output.log"
+cp "$pins_dir/recent-cfsm.env" "$pins_dir/config.env"
+printf "RUNTIME_VERSIONS_PINNED='1'\n" >> "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-monitor=v1.0.19|' "$pins_dir/output.log"
+sed '/^MONITOR_SHA256=/d' "$pins_dir/recent-cfsm.env" > "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-monitor=v1.0.19|.*64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c$' "$pins_dir/output.log"
 
 # Legacy generated configs did not always include checksums. Leaving their
 # old URLs in place must never attach a new release's digest to those URLs.

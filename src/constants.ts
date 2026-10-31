@@ -19,11 +19,11 @@ export const MONITOR_LABELS: Record<MonitorType, string> = {
 
 export const TESTED_VERSIONS = {
   mihomo: {
-    version: 'v1.19.32',
-    url: 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-v1-v1.19.32.gz',
-    sha256: '306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc',
-    fallbackUrl: 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-compatible-v1.19.32.gz',
-    fallbackSha256: 'ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20'
+    version: 'v1.19.33',
+    url: 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-v1-v1.19.33.gz',
+    sha256: '8ec92e7b2fdc6b853ba00156bab7e4e965c8b0d843b8c4ac8ab98795f02ad524',
+    fallbackUrl: 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-linux-amd64-compatible-v1.19.33.gz',
+    fallbackSha256: '386508bfb1c72c43b6a0eda73708ecdce82546581b0ebcb16366c53757c622b6'
   },
   komari: {
     version: '1.5.11',
@@ -31,14 +31,14 @@ export const TESTED_VERSIONS = {
     sha256: '78c28d89e523816baea010c0ed0714f245f508ffdaca0540f5c9f230f7053c8c'
   },
   lite: {
-    version: '2.3.6.0',
-    url: 'https://github.com/nuomiiiii/Lite-agent/releases/download/2.3.6.0/Lite-agent-linux-amd64',
-    sha256: 'd973b48edba2c1be9faea959c231dc6a278fa40ad283d53a459f8ad7727ef15b'
+    version: '2.3.10.1',
+    url: 'https://github.com/nuomiiiii/Lite-agent/releases/download/2.3.10.1/Lite-agent-linux-amd64',
+    sha256: 'b25ce9827b2997bfc96f5e3e957dda52e2f1ea0564b2bd2aca14c6dd38e62562'
   },
   cfsm: {
-    version: 'v1.0.19',
-    url: 'https://github.com/huilang-me/cfsm-agent/releases/download/v1.0.19/cf-probe-linux-amd64',
-    sha256: '64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c'
+    version: 'v1.1.1',
+    url: 'https://github.com/huilang-me/cfsm-agent/releases/download/v1.1.1/cf-probe-linux-amd64',
+    sha256: '3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714'
   }
 } as const;
 

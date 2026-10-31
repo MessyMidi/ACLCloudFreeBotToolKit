@@ -21,6 +21,7 @@ type Config struct {
 	Username         string
 	Password         string
 	ServerSelector   string
+	AppHostname      string
 	AuthStatePath    string
 	TelegramBotToken string
 	TelegramChatID   string
@@ -39,6 +40,7 @@ func LoadConfigFromEnv() (Config, error) {
 		Username:         firstNonEmpty(os.Getenv("ACL_USERNAME"), os.Getenv("ACL_EMAIL")),
 		Password:         os.Getenv("ACL_PASSWORD"),
 		ServerSelector:   firstNonEmpty(os.Getenv("ACL_SERVER_ID"), os.Getenv("P_SERVER_UUID"), os.Getenv("P_SERVER_IDENTIFIER")),
+		AppHostname:      os.Getenv("APP_HOSTNAME"),
 		AuthStatePath:    valueOrDefault("ACL_AUTH_STATE", filepath.Join(baseDir, "data", "acl-auth.json")),
 		TelegramBotToken: strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
 		TelegramChatID:   strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
@@ -57,7 +59,10 @@ func LoadConfigFromEnv() (Config, error) {
 		return Config{}, errors.New("AUTO_RENEW_ENABLED=1 requires ACL_USERNAME and ACL_PASSWORD")
 	}
 	if config.ServerSelector == "" {
-		return Config{}, errors.New("ACLClouds did not provide P_SERVER_UUID; set ACL_SERVER_ID explicitly")
+		config.AppHostname = normalizedHostname(config.AppHostname)
+		if config.AppHostname == "" {
+			return Config{}, errors.New("ACLClouds did not provide a service ID or valid APP_HOSTNAME; set ACL_SERVER_ID explicitly")
+		}
 	}
 	if (config.TelegramBotToken == "") != (config.TelegramChatID == "") {
 		return Config{}, errors.New("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured together")

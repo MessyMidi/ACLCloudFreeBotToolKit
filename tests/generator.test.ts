@@ -82,9 +82,9 @@ describe('generateEnv', () => {
     expect(output).toContain("AUTO_RENEW_ENABLED='0'");
     expect(output).toContain("MONITOR_TYPE='lite'");
     expect(output).toContain("MONITOR_TOKEN='abc'\\''def;$()'");
-    expect(output).toContain("MIHOMO_VERSION='v1.19.32'");
-    expect(output).toContain("MIHOMO_SHA256='306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc'");
-    expect(output).toContain("MIHOMO_FALLBACK_SHA256='ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20'");
+    expect(output).toContain(`MIHOMO_VERSION='${TESTED_VERSIONS.mihomo.version}'`);
+    expect(output).toContain(`MIHOMO_SHA256='${TESTED_VERSIONS.mihomo.sha256}'`);
+    expect(output).toContain(`MIHOMO_FALLBACK_SHA256='${TESTED_VERSIONS.mihomo.fallbackSha256}'`);
     expect(output).not.toContain('SERVER_IP=');
     expect(output).not.toContain('\r');
   });
@@ -130,8 +130,8 @@ describe('generateEnv', () => {
     expect(output).toContain("MONITOR_ENABLED='1'");
     expect(output).toContain("MONITOR_TYPE='cfsm'");
     expect(output).toContain("MONITOR_AGENT_ID='server-id'");
-    expect(output).toContain("MONITOR_VERSION='v1.0.19'");
-    expect(output).toContain("MONITOR_SHA256='64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c'");
+    expect(output).toContain(`MONITOR_VERSION='${TESTED_VERSIONS.cfsm.version}'`);
+    expect(output).toContain(`MONITOR_SHA256='${TESTED_VERSIONS.cfsm.sha256}'`);
     expect(output).toContain("MONITOR_TOKEN='secret'\\''value'");
     expect(output).toContain("CFSM_COLLECT_INTERVAL='2'");
     expect(output).toContain("CFSM_INTERFACE='eth0'");

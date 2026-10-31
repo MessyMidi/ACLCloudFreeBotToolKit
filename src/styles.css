@@ -222,6 +222,16 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 pre { max-height: 390px; overflow: auto; margin: 0; padding: 16px; scrollbar-width: thin; scrollbar-color: var(--code-scrollbar) transparent; }
 pre code { color: var(--code-text); white-space: pre; font: 11px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .startup-card pre { max-height: 150px; }
+.startup-converter { padding: 18px; }
+.startup-converter summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; cursor: pointer; list-style: none; font-size: 14px; }
+.startup-converter summary::-webkit-details-marker { display: none; }
+.startup-converter summary svg { width: 14px; height: 14px; color: var(--muted); transition: transform .18s; }
+.startup-converter[open] summary svg { transform: rotate(180deg); }
+.startup-converter textarea { margin-top: 8px; min-height: 90px; }
+.startup-converter .field-hint { line-height: 1.7; }
+.convert-button { margin-top: 12px; padding: 9px 14px; border-radius: 7px; background: var(--mint); color: var(--green); font-size: 13px; transition: background .18s; }
+.convert-button:hover { background: var(--soft); }
+#converter-error { margin-bottom: 0; overflow-wrap: anywhere; }
 .startup-card pre code { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--code-startup-text); }
 .output-panel.ready .output-heading .status-dot { box-shadow: 0 0 0 4px rgb(44 163 124 / 10%); }
 

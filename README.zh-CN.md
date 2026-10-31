@@ -18,7 +18,7 @@
    - 文件名：`config`
    - 类型：`Env (.env)`
 4. 粘贴页面生成的 `config.env`。
-5. 将生成的 Startup Command 粘贴到 ACLClouds 的 **Startup** 页面。
+5. 将生成的 Startup Command 粘贴到 ACLClouds 的 **Startup** 页面，并手动指定一个端口。
 6. 启动或重启 Bot。
 
 `SERVER_IP` 和 `SERVER_PORT` 通常由 ACLClouds 自动注入。如果面板地址显示 `n/a`，请检查分配地址/Startup 设置或联系 ACLClouds。Mihomo 必须有已分配的 `SERVER_PORT`；缺少 `SERVER_IP` 时仍可监听，但暂不生成分享链接。确认分配信息后，也可在 `config.env` 中填写 `SERVER_IP` 为其公网地址。仅运行探针或延期时，两者都不需要。
@@ -42,7 +42,7 @@
 
 ### ACLClouds 自动延期
 
-可选的自动延期任务会定期检查当前 ACLClouds 服务，在进入可延期状态后自动完成延期。延期任务负责判断是否可以延期，并处理验证和失败重试；Telegram 通知可按需开启。
+可选的自动延期任务会定期检查当前 ACLClouds 服务，在进入可延期状态后自动完成延期。延期任务负责判断是否可以延期，并处理验证和失败重试；若自动识别失败，可在生成器的`自动延期` → `高级设置`填写 Service ID；Telegram 通知可按需开启。
 不需要额外运行 GitHub Actions 或另一台服务器，延期程序直接运行在当前 Bot 中。
 
 ### 自动更新

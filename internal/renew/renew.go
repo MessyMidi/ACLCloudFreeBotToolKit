@@ -38,9 +38,11 @@ var errSessionExpired = errors.New("ACLClouds session expired during renewal")
 type server struct {
 	Identifier            string
 	UUID                  string
+	HostingAppID          string
 	Name                  string
 	ExpiresAt             string
 	CanRenew              *bool
+	IsFree                *bool
 	FreeRenewalsRemaining *int
 }
 
@@ -57,7 +59,7 @@ func Check(ctx context.Context, config Config) (Result, error) {
 	if err != nil {
 		return fail(ctx, config, fmt.Errorf("create HTTP session: %w", err))
 	}
-	servers, unauthorized, err := s.listServers(ctx)
+	target, unauthorized, err := s.findTarget(ctx, config)
 	if err != nil {
 		return fail(ctx, config, err)
 	}
@@ -65,7 +67,7 @@ func Check(ctx context.Context, config Config) (Result, error) {
 		if err := s.login(ctx, config.Username, config.Password); err != nil {
 			return fail(ctx, config, err)
 		}
-		servers, unauthorized, err = s.listServers(ctx)
+		target, unauthorized, err = s.findTarget(ctx, config)
 		if err != nil {
 			return fail(ctx, config, err)
 		}
@@ -81,9 +83,8 @@ func Check(ctx context.Context, config Config) (Result, error) {
 		}
 	}()
 
-	target, err := selectServer(servers, config.ServerSelector)
-	if err != nil {
-		return fail(ctx, config, err)
+	if target.IsFree != nil && !*target.IsFree {
+		return Result{Skipped: true, Message: fmt.Sprintf("%s: automatic renewal only handles free services", target.displayName())}, nil
 	}
 	if target.CanRenew != nil && !*target.CanRenew {
 		return Result{Skipped: true, Message: fmt.Sprintf("%s: renewal is not available yet%s", target.displayName(), expirySuffix(target.ExpiresAt))}, nil
@@ -160,30 +161,34 @@ func (s *session) listServers(ctx context.Context) ([]server, bool, error) {
 		if identifier == "" {
 			continue
 		}
-		servers = append(servers, server{
-			Identifier:            identifier,
-			UUID:                  stringValue(item.Attributes, "uuid"),
-			Name:                  stringValue(item.Attributes, "name"),
-			ExpiresAt:             stringValue(item.Attributes, "expires_at", "expire_at"),
-			CanRenew:              boolPointer(item.Attributes, "can_renew"),
-			FreeRenewalsRemaining: intPointer(item.Attributes, "free_renewals_remaining"),
-		})
+		servers = append(servers, serverFromAttributes(item.Attributes))
 	}
 	return servers, false, nil
 }
 
 func selectServer(servers []server, selector string) (server, error) {
 	selector = strings.TrimSpace(selector)
+	var selected server
+	found := false
 	for _, candidate := range servers {
-		if selector == candidate.Identifier || selector == candidate.UUID {
-			return candidate, nil
+		if selector != "" && (selector == candidate.Identifier || selector == candidate.UUID || selector == candidate.HostingAppID) {
+			if found {
+				return server{}, errors.New("service ID matches multiple ACLClouds services; refusing to renew")
+			}
+			selected, found = candidate, true
 		}
 	}
-	return server{}, fmt.Errorf("current ACLClouds service %q was not found in /api/client", selector)
+	if found {
+		return selected, nil
+	}
+	return server{}, fmt.Errorf("%w: current ACLClouds service %q was not found in /api/client", errServerNotFound, selector)
 }
 
 func (s *session) renew(ctx context.Context, target server) (Result, error) {
 	path := "/api/client/servers/" + url.PathEscape(target.Identifier) + "/upgrade/renew"
+	if target.HostingAppID != "" {
+		path = hostingAppPath(target.HostingAppID) + "/renew"
+	}
 	result, err := s.request(ctx, http.MethodPost, path, map[string]any{})
 	if err != nil {
 		return Result{}, fmt.Errorf("renew %s: %w", target.displayName(), err)
@@ -263,6 +268,9 @@ func (s *session) confirmRenewal(ctx context.Context, target server, renewBody [
 	}
 	newExpiry := expirationFromBody(renewBody)
 	path := "/api/client/servers/" + url.PathEscape(target.Identifier)
+	if target.HostingAppID != "" {
+		path = hostingAppPath(target.HostingAppID) + "/server"
+	}
 	detail, err := s.request(ctx, http.MethodGet, path, nil)
 	if err == nil && detail.Status == http.StatusOK {
 		if expiry := expirationFromBody(detail.Body); expiry != "" {

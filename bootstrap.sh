@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-BOOTSTRAP_VERSION='0.7.6'
+BOOTSTRAP_VERSION='0.7.7'
 SUPPORTED_CONFIG_SCHEMA_VERSION=2
 DEFAULT_UPDATE_BASE_URL='https://github.com/MessyMidi/ACLCloudFreeBotToolKit/releases/latest/download'
 DEFAULT_RELEASES_API_URL='https://api.github.com/repos/MessyMidi/ACLCloudFreeBotToolKit/releases?per_page=20'
@@ -931,7 +931,7 @@ start_renew_check() {
         # Monitor credentials must not reach this unrelated process merely
         # because they live in the same config.env file.
         export AUTO_RENEW_ENABLED ACL_BASE_URL ACL_USERNAME ACL_EMAIL ACL_PASSWORD \
-            ACL_SERVER_ID P_SERVER_UUID P_SERVER_IDENTIFIER ACL_AUTH_STATE \
+            ACL_SERVER_ID P_SERVER_UUID P_SERVER_IDENTIFIER APP_HOSTNAME ACL_AUTH_STATE \
             TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID TELEGRAM_API_BASE
         export -n MONITOR_TOKEN KOMARI_TOKEN CFSM_SECRET
         printf '\n===== renewal check %s =====\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf 'started')"

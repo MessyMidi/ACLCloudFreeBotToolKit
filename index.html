@@ -163,7 +163,7 @@
             <fieldset class="module-body" id="renewal-fields">
               <div class="renewal-notice">
                 <strong data-i18n="renewal.scopeTitle">只处理当前容器</strong>
-                <p data-i18n-rich="renewal.scopeBody">默认用 ACLClouds 注入的 <code>P_SERVER_UUID</code> 精确匹配 API 返回的服务；不会猜测 UUID，也不会遍历续期账号下的其他服务。</p>
+                <p data-i18n-rich="renewal.scopeBody">优先使用指定的 Service ID 或平台注入的 UUID；缺失时，将 <code>APP_HOSTNAME</code> 与 API 返回的应用主机名精确匹配，只续期已确认的当前服务。</p>
               </div>
               <div class="field-grid">
                 <label><span class="field-label" data-i18n="renewal.username">ACLClouds 邮箱 / 用户名</span><input id="acl-username" autocomplete="username" /><small class="field-error" data-renew-error-for="username"></small></label>
@@ -176,7 +176,7 @@
               </div>
               <details class="advanced">
                 <summary><span data-i18n="renewal.advanced">高级设置</span><small data-i18n="renewal.advancedHint">通常留空</small><svg><use href="#i-chevron" /></svg></summary>
-                <label><span class="field-label" data-i18n="renewal.serverId">Service ID 覆盖</span><input id="acl-server-id" autocomplete="off" placeholder="留空则使用 P_SERVER_UUID" data-i18n-placeholder="renewal.serverIdPlaceholder" /><small class="field-hint" data-i18n="renewal.serverIdHint">仅当运行环境未注入 UUID，或 API 返回值无法匹配时填写真实 identifier / UUID。</small><small class="field-error" data-renew-error-for="serverId"></small></label>
+                <label><span class="field-label" data-i18n="renewal.serverId">Service ID 覆盖</span><input id="acl-server-id" autocomplete="off" placeholder="留空则自动识别当前容器" data-i18n-placeholder="renewal.serverIdPlaceholder" /><small class="field-hint" data-i18n="renewal.serverIdHint">自动识别失败时，填写真实服务 identifier / UUID，或新面板地址 /server/ 后的应用 UUID。</small><small class="field-error" data-renew-error-for="serverId"></small></label>
               </details>
               <p class="field-hint renewal-hint" data-i18n-rich="renewal.schedule">启动时检查一次，之后每 24 小时加少量随机延迟检查；检查失败会在 30 分钟后重试，之后逐次拉长间隔。结果始终写入本地日志，可在 Console 输入 <code>7</code> 查询；填写完整 Telegram 配置后才额外推送。</p>
             </fieldset>
@@ -198,6 +198,22 @@
         </form>
 
         <aside class="result-column">
+          <details class="panel startup-converter" id="startup-converter">
+            <summary><strong data-i18n="converter.title">转换旧启动命令</strong><svg><use href="#i-chevron" /></svg></summary>
+            <p class="field-hint" data-i18n="converter.hint">粘贴旧版命令，转换为当前 Stable 短命令。只在本地解析，不执行或保存输入。</p>
+            <label for="old-startup-command" class="field-label" data-i18n="converter.label">旧的 Startup Command</label>
+            <textarea id="old-startup-command" rows="3" maxlength="12000" autocomplete="off" spellcheck="false" placeholder="粘贴旧版 bootstrap 或 launcher 启动命令" data-i18n-placeholder="converter.placeholder" aria-describedby="converter-note converter-error"></textarea>
+            <button class="convert-button" id="convert-startup" type="button" data-i18n="converter.action">转换命令</button>
+            <p class="field-error" id="converter-error" role="status"></p>
+            <div id="converted-result" hidden>
+              <p class="field-hint" id="converter-status" role="status"></p>
+              <article class="code-card startup-card">
+                <div class="code-heading"><strong data-i18n="converter.result">新的 Startup Command</strong><button class="copy-button" type="button" data-copy="converted" aria-label="复制新命令" data-i18n-aria-label="converter.copy"><svg><use href="#i-copy" /></svg><span data-i18n="converter.copy">复制新命令</span></button></div>
+                <pre><code id="converted-startup-output"></code></pre>
+              </article>
+            </div>
+            <p class="field-hint" id="converter-note" data-i18n="converter.note">保留明确的自动更新开关；未指定时使用左侧开关。config.env 不变，旧命令中的额外变量和参数不会迁移。请在 Startup 页面手动指定端口。</p>
+          </details>
           <section class="panel output-panel" id="output-panel">
             <div class="output-heading"><div><span class="status-dot"></span><strong data-i18n="output.title">生成结果</strong><small id="output-status">等待填写配置</small></div><span class="local-only"><svg><use href="#i-lock" /></svg>LOCAL ONLY</span></div>
 
@@ -224,7 +240,7 @@
             <ol>
               <li><span>1</span><div><strong data-i18n="steps.filesTitle">打开 Files</strong><p data-i18n="steps.filesBody">进入 ACLClouds Bot 的文件管理器。</p></div></li>
               <li><span>2</span><div><strong data-i18n="steps.configTitle">创建 config.env</strong><p data-i18n-rich="steps.configBody">Create File → 名称填 <code>config</code> → 类型选 Env (.env)，粘贴配置。</p></div></li>
-              <li><span>3</span><div><strong data-i18n="steps.startupTitle">设置 Startup Command</strong><p data-i18n="steps.startupBody">进入 Startup，粘贴上方生成的固定 bootstrap 命令；以后无需修改版本 URL。</p></div></li>
+              <li><span>3</span><div><strong data-i18n="steps.startupTitle">设置 Startup Command</strong><p data-i18n="steps.startupBody">进入 Startup，粘贴上方生成的固定 bootstrap 命令，并手动指定一个端口；以后无需修改版本 URL。</p></div></li>
               <li><span>4</span><div><strong data-i18n="steps.restartTitle">Restart</strong><p data-i18n="steps.restartBody">等待 Console 显示 Server marked as running 和已启用服务状态；启用代理时会输出 VLESS 链接。</p></div></li>
               <li><span>5</span><div><strong data-i18n="steps.consoleTitle">Console 查询</strong><p data-i18n-rich="steps.consoleBody">启用代理后输入 <code>2</code> 找回链接；启用自动延期后输入 <code>7</code> 查看最近检查结果。</p></div></li>
             </ol>

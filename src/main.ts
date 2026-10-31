@@ -14,6 +14,7 @@ import { detectLocale, getLocale, isMessageKey, setLocale, t } from './i18n';
 import type { Locale, MessageKey, MessageParams } from './i18n';
 import { maskToken, parseMonitorCommand } from './monitor-parser';
 import { FORM_STORAGE_KEY, parseStoredState, renewalForStorage } from './storage';
+import { convertStartupCommand } from './startup-converter';
 import type { StoredFormState } from './storage';
 import type { MonitorConfig, MonitorSelection, ProxyConfig, RenewalConfig } from './types';
 
@@ -37,6 +38,7 @@ let parsedMonitor: MonitorConfig | undefined;
 let tokenVisible = false;
 let toastTimer = 0;
 let saveTimer = 0;
+let converterAttempted = false;
 
 interface StatusMessage {
   key: MessageKey;
@@ -236,8 +238,25 @@ function toast(message: string): void {
   toastTimer = window.setTimeout(() => { element.hidden = true; }, 2200);
 }
 
-async function copyText(kind: 'env' | 'startup', button: HTMLButtonElement): Promise<void> {
-  const source = kind === 'env' ? byId('env-output') : byId('startup-output');
+function clearConverter(): void {
+  converterAttempted = false;
+  byId('converter-error').textContent = '';
+  byId('converter-status').textContent = '';
+  byId('converted-startup-output').textContent = '';
+  byId('converted-result').hidden = true;
+}
+
+function renderConverter(): void {
+  const result = convertStartupCommand(byId<HTMLTextAreaElement>('old-startup-command').value, autoUpdate.checked);
+  byId('converter-error').textContent = result.error ? t(result.error) : '';
+  byId('converted-result').hidden = Boolean(result.error);
+  byId('converted-startup-output').textContent = result.command ?? '';
+  byId('converter-status').textContent = result.command
+    ? t(result.autoUpdate ? 'converter.enabled' : 'converter.disabled', { length: result.command.length }) : '';
+}
+
+async function copyText(kind: 'env' | 'startup' | 'converted', button: HTMLButtonElement): Promise<void> {
+  const source = byId(kind === 'env' ? 'env-output' : kind === 'converted' ? 'converted-startup-output' : 'startup-output');
   const text = source.textContent ?? '';
   if (!text) return;
   try {
@@ -257,7 +276,7 @@ async function copyText(kind: 'env' | 'startup', button: HTMLButtonElement): Pro
   button.classList.add('copied');
   toast(t(kind === 'env' ? 'output.envCopied' : 'output.startupCopied'));
   window.setTimeout(() => {
-    label.textContent = t(kind === 'env' ? 'output.copyEnv' : 'output.copyStartup');
+    label.textContent = t(kind === 'env' ? 'output.copyEnv' : kind === 'converted' ? 'converter.copy' : 'output.copyStartup');
     button.classList.remove('copied');
   }, 1800);
 }
@@ -330,6 +349,7 @@ function renderLocale(): void {
   translateElements('data-i18n-tooltip', (element, text) => element.setAttribute('data-tooltip', text));
   byId('output-status').textContent = t(outputStatus.key, outputStatus.params);
   byId('storage-status').textContent = t(storageStatus.key);
+  if (converterAttempted) renderConverter();
 }
 
 function switchLocale(locale: Locale): void {
@@ -417,6 +437,8 @@ function resetSavedState(): void {
   form.reset();
   rememberRenewalSecrets.checked = false;
   commandInput.value = '';
+  byId<HTMLTextAreaElement>('old-startup-command').value = '';
+  clearConverter();
   applyDefaultProxy();
   parsedMonitor = undefined;
   tokenVisible = false;
@@ -442,7 +464,10 @@ renewalEnabled.addEventListener('change', () => syncModuleState('renewal-section
 rememberRenewalSecrets.addEventListener('change', saveFormState);
 revealButton.addEventListener('click', () => { tokenVisible = !tokenVisible; updateTokenPreview(); });
 form.addEventListener('submit', (event) => { event.preventDefault(); generate(); });
-document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => button.addEventListener('click', () => void copyText(button.dataset.copy as 'env' | 'startup', button)));
+document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => button.addEventListener('click', () => void copyText(button.dataset.copy as 'env' | 'startup' | 'converted', button)));
+byId('convert-startup').addEventListener('click', () => { converterAttempted = true; renderConverter(); });
+byId('old-startup-command').addEventListener('input', clearConverter);
+autoUpdate.addEventListener('change', clearConverter);
 byId('theme-toggle').addEventListener('click', () => {
   const dark = !document.body.classList.contains('dark');
   writeStorage(THEME_STORAGE_KEY, dark ? 'dark' : 'light');

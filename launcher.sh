@@ -10,7 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-LAUNCHER_VERSION='0.7.6'
+LAUNCHER_VERSION='0.7.7'
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$BASE_DIR/bin"
@@ -144,7 +144,12 @@ refresh_official_runtime_pins() {
           "${MIHOMO_URL:-}" == 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-linux-amd64-v1-v1.19.31.gz' &&
           "${MIHOMO_SHA256:-}" == 'd4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114' &&
           "${MIHOMO_FALLBACK_URL:-}" == 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-linux-amd64-compatible-v1.19.31.gz' &&
-          "${MIHOMO_FALLBACK_SHA256:-}" == '04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc' ]]; then
+          "${MIHOMO_FALLBACK_SHA256:-}" == '04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc' ]] ||
+       [[ "${MIHOMO_VERSION:-}" == 'v1.19.32' &&
+          "${MIHOMO_URL:-}" == 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-v1-v1.19.32.gz' &&
+          "${MIHOMO_SHA256:-}" == '306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc' &&
+          "${MIHOMO_FALLBACK_URL:-}" == 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-compatible-v1.19.32.gz' &&
+          "${MIHOMO_FALLBACK_SHA256:-}" == 'ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20' ]]; then
         unset MIHOMO_VERSION MIHOMO_URL MIHOMO_SHA256 MIHOMO_FALLBACK_URL MIHOMO_FALLBACK_SHA256
         log 'Using current Toolkit Mihomo pin instead of the previous generated pin'
     fi
@@ -153,7 +158,10 @@ refresh_official_runtime_pins() {
         lite)
             if [[ "${MONITOR_VERSION:-}" == '2.3.3.5' &&
                   "${MONITOR_URL:-}" == 'https://github.com/nuomiiiii/Lite-agent/releases/download/2.3.3.5/Lite-agent-linux-amd64' &&
-                  "${MONITOR_SHA256:-}" == 'c39042e712bd204a5ea359b6d0f0f5b2c3e6bf6fa9bdcd8954e8fad30f32a6ed' ]]; then
+                  "${MONITOR_SHA256:-}" == 'c39042e712bd204a5ea359b6d0f0f5b2c3e6bf6fa9bdcd8954e8fad30f32a6ed' ]] ||
+               [[ "${MONITOR_VERSION:-}" == '2.3.6.0' &&
+                  "${MONITOR_URL:-}" == 'https://github.com/nuomiiiii/Lite-agent/releases/download/2.3.6.0/Lite-agent-linux-amd64' &&
+                  "${MONITOR_SHA256:-}" == 'd973b48edba2c1be9faea959c231dc6a278fa40ad283d53a459f8ad7727ef15b' ]]; then
                 unset MONITOR_VERSION MONITOR_URL MONITOR_SHA256
                 log 'Using current Toolkit Lite pin instead of the previous generated pin'
             fi
@@ -161,7 +169,10 @@ refresh_official_runtime_pins() {
         cfsm)
             if [[ "${MONITOR_VERSION:-}" == 'v1.0.18' &&
                   "${MONITOR_URL:-}" == 'https://github.com/huilang-me/cfsm-agent/releases/download/v1.0.18/cf-probe-linux-amd64' &&
-                  "${MONITOR_SHA256:-}" == '757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa' ]]; then
+                  "${MONITOR_SHA256:-}" == '757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa' ]] ||
+               [[ "${MONITOR_VERSION:-}" == 'v1.0.19' &&
+                  "${MONITOR_URL:-}" == 'https://github.com/huilang-me/cfsm-agent/releases/download/v1.0.19/cf-probe-linux-amd64' &&
+                  "${MONITOR_SHA256:-}" == '64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c' ]]; then
                 unset MONITOR_VERSION MONITOR_URL MONITOR_SHA256
                 log 'Using current Toolkit CFSM pin instead of the previous generated pin'
             fi
@@ -176,20 +187,44 @@ refresh_official_runtime_pins
 # Run AFTER refreshing complete specs: partial/pinned specs keep their version,
 # and any explicitly supplied checksum or custom URL remains untouched.
 restore_legacy_official_checksums() {
-    local base primary fallback
-    if [[ "${MIHOMO_VERSION:-}" == 'v1.19.31' ]]; then
-        base='https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31'
-        primary="$base/mihomo-linux-amd64-v1-v1.19.31.gz"
-        fallback="$base/mihomo-linux-amd64-compatible-v1.19.31.gz"
+    local base primary fallback primary_sha fallback_sha
+    primary_sha=''
+    fallback_sha=''
+    case "${MIHOMO_VERSION:-}" in
+        v1.19.31)
+            primary_sha='d4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114'
+            fallback_sha='04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc'
+            ;;
+        v1.19.32)
+            primary_sha='306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc'
+            fallback_sha='ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20'
+            ;;
+    esac
+    if [[ -n "$primary_sha" ]]; then
+        base="https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}"
+        primary="$base/mihomo-linux-amd64-v1-${MIHOMO_VERSION}.gz"
+        fallback="$base/mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz"
         if [[ -z "${MIHOMO_SHA256:-}" && "${MIHOMO_URL:-$primary}" == "$primary" ]]; then
-            MIHOMO_SHA256='d4304c546c3cddcb6fafd4b4fddb0ba1a95ffa36606fda56d75db2e59ad24114'
+            MIHOMO_SHA256="$primary_sha"
         fi
         if [[ -z "${MIHOMO_FALLBACK_SHA256:-}" && "${MIHOMO_FALLBACK_URL:-$fallback}" == "$fallback" ]]; then
-            MIHOMO_FALLBACK_SHA256='04cf9f09671704f839ddbee2e93069dc831a4123a75281e725d1d96ab9ac1afc'
+            MIHOMO_FALLBACK_SHA256="$fallback_sha"
         fi
     fi
 
     case "${MONITOR_TYPE:-komari}:${MONITOR_VERSION:-}" in
+        lite:2.3.6.0)
+            primary='https://github.com/nuomiiiii/Lite-agent/releases/download/2.3.6.0/Lite-agent-linux-amd64'
+            if [[ -z "${MONITOR_SHA256:-}" && "${MONITOR_URL:-$primary}" == "$primary" ]]; then
+                MONITOR_SHA256='d973b48edba2c1be9faea959c231dc6a278fa40ad283d53a459f8ad7727ef15b'
+            fi
+            ;;
+        cfsm:v1.0.19)
+            primary='https://github.com/huilang-me/cfsm-agent/releases/download/v1.0.19/cf-probe-linux-amd64'
+            if [[ -z "${MONITOR_SHA256:-}" && "${MONITOR_URL:-$primary}" == "$primary" ]]; then
+                MONITOR_SHA256='64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c'
+            fi
+            ;;
         lite:2.3.3.5)
             primary='https://github.com/nuomiiiii/Lite-agent/releases/download/2.3.3.5/Lite-agent-linux-amd64'
             if [[ -z "${MONITOR_SHA256:-}" && "${MONITOR_URL:-$primary}" == "$primary" ]]; then
@@ -210,11 +245,11 @@ restore_legacy_official_checksums
 # ---------------- Defaults ----------------
 
 MIHOMO_ENABLED="${MIHOMO_ENABLED:-1}"
-MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.32}"
+MIHOMO_VERSION="${MIHOMO_VERSION:-v1.19.33}"
 MIHOMO_URL="${MIHOMO_URL:-https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-v1-${MIHOMO_VERSION}.gz}"
-MIHOMO_SHA256="${MIHOMO_SHA256:-306f81e723e60ce6b828899a6fe83e1d00e9ecefb2dc8d4d849312a5bc00efdc}"
+MIHOMO_SHA256="${MIHOMO_SHA256:-8ec92e7b2fdc6b853ba00156bab7e4e965c8b0d843b8c4ac8ab98795f02ad524}"
 MIHOMO_FALLBACK_URL="${MIHOMO_FALLBACK_URL:-https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz}"
-MIHOMO_FALLBACK_SHA256="${MIHOMO_FALLBACK_SHA256:-ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20}"
+MIHOMO_FALLBACK_SHA256="${MIHOMO_FALLBACK_SHA256:-386508bfb1c72c43b6a0eda73708ecdce82546581b0ebcb16366c53757c622b6}"
 
 MIHOMO_LOGLEVEL="${MIHOMO_LOGLEVEL:-info}"
 MIHOMO_REMARK="${MIHOMO_REMARK:-ACLClouds-Free}"
@@ -292,9 +327,9 @@ if [[ "$MONITOR_ENABLED" == "1" ]]; then
     [[ "$MONITOR_REMOTE_CONTROL" == "true" || "$MONITOR_REMOTE_CONTROL" == "false" ]] || die "MONITOR_REMOTE_CONTROL must be true or false"
     case "$MONITOR_TYPE" in
         lite)
-            MONITOR_VERSION="${MONITOR_VERSION:-2.3.6.0}"
+            MONITOR_VERSION="${MONITOR_VERSION:-2.3.10.1}"
             MONITOR_URL="${MONITOR_URL:-https://github.com/nuomiiiii/Lite-agent/releases/download/${MONITOR_VERSION}/Lite-agent-linux-amd64}"
-            MONITOR_SHA256="${MONITOR_SHA256:-d973b48edba2c1be9faea959c231dc6a278fa40ad283d53a459f8ad7727ef15b}"
+            MONITOR_SHA256="${MONITOR_SHA256:-b25ce9827b2997bfc96f5e3e957dda52e2f1ea0564b2bd2aca14c6dd38e62562}"
             MONITOR_BIN="$LITE_BIN"
             ;;
         komari)
@@ -307,9 +342,9 @@ if [[ "$MONITOR_ENABLED" == "1" ]]; then
             MONITOR_ENDPOINT="${MONITOR_ENDPOINT:-${CFSM_URL:-}}"
             MONITOR_TOKEN="${MONITOR_TOKEN:-${CFSM_SECRET:-}}"
             MONITOR_AGENT_ID="${MONITOR_AGENT_ID:-${CFSM_ID:-}}"
-            MONITOR_VERSION="${MONITOR_VERSION:-v1.0.19}"
+            MONITOR_VERSION="${MONITOR_VERSION:-v1.1.1}"
             MONITOR_URL="${MONITOR_URL:-https://github.com/huilang-me/cfsm-agent/releases/download/${MONITOR_VERSION}/cf-probe-linux-amd64}"
-            MONITOR_SHA256="${MONITOR_SHA256:-64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c}"
+            MONITOR_SHA256="${MONITOR_SHA256:-3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714}"
             MONITOR_BIN="$CFSM_BIN"
             CFSM_COLLECT_INTERVAL="${CFSM_COLLECT_INTERVAL:-0}"
             CFSM_REPORT_INTERVAL="${CFSM_REPORT_INTERVAL:-60}"

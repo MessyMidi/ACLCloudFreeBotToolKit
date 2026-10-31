@@ -19,7 +19,7 @@ A configuration generator and runtime helper for ACLClouds Free Bot. Use the Web
    - Name: `config`
    - Type: `Env (.env)`
 4. Paste the generated `config.env` into the file.
-5. Paste the generated Startup Command into the **Startup** page.
+5. Paste the generated Startup Command into the **Startup** page and manually assign a port.
 6. Start or restart the Bot.
 
 `SERVER_IP` and `SERVER_PORT` normally come from ACLClouds. If the panel shows address `n/a`, check its allocation/Startup settings or contact ACLClouds. Mihomo requires an allocated `SERVER_PORT`; missing `SERVER_IP` allows listening but withholds the share link. Once the allocation is confirmed, its public address may be supplied as `SERVER_IP` in `config.env`. Monitor-only and renewal-only modes need neither value.
@@ -44,7 +44,7 @@ The monitor can run alongside Mihomo or on its own.
 
 ### ACLClouds Automatic Renewal
 
-The optional renewal job checks the current ACLClouds service periodically and renews it once renewal becomes available. It determines whether renewal is currently allowed, handles the verification flow, and retries after failures. Telegram notifications can be enabled if needed.
+The optional renewal job checks the current ACLClouds service periodically and renews it once renewal becomes available. It determines whether renewal is currently allowed, handles the verification flow, and retries after failures. If automatic detection fails, enter the Service ID under `Automatic renewal` → `Advanced` in the generator. Telegram notifications can be enabled if needed.
 
 No separate GitHub Actions workflow or extra server is required. The renewal helper runs directly inside the current Bot.
 

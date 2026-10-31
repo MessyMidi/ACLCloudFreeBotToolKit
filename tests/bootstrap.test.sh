@@ -246,6 +246,7 @@ MONITOR_ENABLED='0'
 AUTO_RENEW_ENABLED='1'
 ACL_USERNAME='person@example.com'
 ACL_PASSWORD='password'
+APP_HOSTNAME='bot-abc12345.aclclouds.online'
 MONITOR_TOKEN='monitor-secret-must-not-leak'
 EOF
 (
@@ -272,6 +273,7 @@ wait "$renew_bootstrap_pid" 2>/dev/null || true
 assert_contains '^\[renew\] Check finished with exit code 0$' "$renew_dir/logs/renew.log"
 assert_contains '^ACL_USERNAME=person@example.com$' "$renew_dir/data/renew-test.env"
 assert_contains '^ACL_PASSWORD=password$' "$renew_dir/data/renew-test.env"
+assert_contains '^APP_HOSTNAME=bot-abc12345.aclclouds.online$' "$renew_dir/data/renew-test.env"
 if grep -Eq 'monitor-secret-must-not-leak|^MONITOR_TOKEN=' "$renew_dir/data/renew-test.env"; then
     printf 'monitor credentials leaked into the renewal helper environment\n' >&2
     exit 1
