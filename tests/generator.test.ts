@@ -37,23 +37,7 @@ const cfsmMonitor = {
   token: "secret'value",
   remoteControl: false as const,
   agentId: 'server-id',
-  options: {
-    collectInterval: 2,
-    reportInterval: 60,
-    connectionMode: 'auto' as const,
-    pingMode: 'tcp' as const,
-    resetDay: 1,
-    debug: false,
-    ctNode: '',
-    cuNode: '',
-    cmNode: '',
-    bdNode: '',
-    node1: '',
-    node2: '',
-    node3: '',
-    node4: '',
-    networkInterface: 'eth0'
-  }
+  ua: 'MyAgent/1.0'
 };
 
 describe('shellQuote', () => {
@@ -133,8 +117,9 @@ describe('generateEnv', () => {
     expect(output).toContain(`MONITOR_VERSION='${TESTED_VERSIONS.cfsm.version}'`);
     expect(output).toContain(`MONITOR_SHA256='${TESTED_VERSIONS.cfsm.sha256}'`);
     expect(output).toContain("MONITOR_TOKEN='secret'\\''value'");
-    expect(output).toContain("CFSM_COLLECT_INTERVAL='2'");
-    expect(output).toContain("CFSM_INTERFACE='eth0'");
+    expect(output).toContain("CFSM_UA='MyAgent/1.0'");
+    expect(output).not.toContain('CFSM_COLLECT_INTERVAL');
+    expect(output).not.toContain('CFSM_INTERFACE');
     expect(output).not.toContain('CFSM_INSTALL_SCRIPT');
   });
 

@@ -54,11 +54,11 @@
 
 launcher 启动失败重试期间仍按原有周期检查更新，以便获取修复。旧 bootstrap 可能无法在启动失败后进入定时检查，需要重启或替换旧 bootstrap 才能获得这项修复。再次尝试前请保留日志。
 
-Mihomo 和探针使用 Toolkit 选定并校验 SHA256 的固定版本，不启用上游自更新。新 launcher 也会升级上一版 Toolkit 生成的完整官方版本组合（Mihomo `v1.19.31`、Lite `2.3.3.5`、CFSM `v1.0.18`）；自定义或不完整的版本、URL、校验值组合保持不动。如需连旧官方版本也保持固定，可在 `config.env` 添加 `RUNTIME_VERSIONS_PINNED='1'`。该过程不会改写配置文件。launcher 启动时会按变化后的安装规格替换缓存；下载或校验失败则保留已有程序，下次启动重试。
+Mihomo 和探针使用 Toolkit 选定并校验 SHA256 的固定版本，不启用上游自更新。新 launcher 也会升级上一版 Toolkit 生成的完整官方版本组合（Mihomo `v1.19.31`、Lite `2.3.3.5`、CFSM `v1.0.18` / `v1.0.19` / `v1.1.1`）；自定义或不完整的版本、URL、校验值组合保持不动。如需连旧官方版本也保持固定，可在 `config.env` 添加 `RUNTIME_VERSIONS_PINNED='1'`。该过程不会改写配置文件。launcher 启动时会按变化后的安装规格替换缓存；下载或校验失败则保留已有程序，下次启动重试。
 
 旧官方配置缺少校验值时，保持其版本，仅在内存中补齐该资产对应的 checksum（包括 Mihomo compatible 备用包），不会套用新版本的校验值。已有的非空校验值保持不动；自定义资产应同时填写匹配的 checksum。
 
-当前固定版本：Mihomo `v1.19.32`、Komari Agent `1.5.11`、Lite Agent `2.3.6.0`、CFSM `v1.0.19`。Lite 新版的远程文件传输加速需要配套 Lite 服务端 `2.3.6` 对应更新或更高版本；上游说明仅升级 Agent 时原有传输功能仍可用。
+当前固定版本：Mihomo `v1.19.32`、Komari Agent `1.5.11`、Lite Agent `2.3.6.0`、CFSM `v1.1.2`。Lite 新版的远程文件传输加速需要配套 Lite 服务端 `2.3.6` 对应更新或更高版本；上游说明仅升级 Agent 时原有传输功能仍可用。
 
 ### Console
 

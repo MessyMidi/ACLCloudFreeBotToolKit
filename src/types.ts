@@ -20,29 +20,12 @@ export interface StandardMonitorConfig extends MonitorConfigBase {
   type: 'lite' | 'komari';
 }
 
-export interface CfsmOptions {
-  collectInterval: number;
-  reportInterval: number;
-  connectionMode: 'auto' | 'http';
-  pingMode: 'tcp' | 'icmp';
-  resetDay: number;
-  debug: boolean;
-  ctNode: string;
-  cuNode: string;
-  cmNode: string;
-  bdNode: string;
-  node1: string;
-  node2: string;
-  node3: string;
-  node4: string;
-  networkInterface: string;
-}
-
 export interface CfsmMonitorConfig extends MonitorConfigBase {
   type: 'cfsm';
   remoteControl: false;
   agentId: string;
-  options: CfsmOptions;
+  /** Initial User-Agent; the panel setting overrides it at runtime. */
+  ua: string;
 }
 
 export type MonitorConfig = StandardMonitorConfig | CfsmMonitorConfig;
