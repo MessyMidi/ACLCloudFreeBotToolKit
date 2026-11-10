@@ -80,36 +80,40 @@ describe('parseMonitorCommand', () => {
     expect(result.errors).toContain('Endpoint 必须是有效的 http:// 或 https:// 地址');
   });
 
-  it('detects CF Server Monitor and preserves official runtime options', () => {
+  it('detects CF Server Monitor and keeps only the User-Agent runtime option', () => {
     const result = parseMonitorCommand(
-      "curl -fsSL 'https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh' | sh -s -- install -id=server-id -secret='my secret' -url=https://worker.example.com/update -collect_interval=2 -interval=60 -connection_mode=http -ping_mode=icmp -reset_day=0 -ct='ct.example.com:80' -interface='eth0,eth1' -auto_update=1"
+      "curl -fsSL 'https://raw.githubusercontent.com/huilang-me/cfsm-agent/main/install.sh' | sh -s -- install -id=server-id -secret='my secret' -url=https://worker.example.com/update -ua='My Agent/1.0 (Linux)' -collect_interval=2 -interval=60 -connection_mode=http -ping_mode=icmp -reset_day=0 -ct='ct.example.com:80' -interface='eth0,eth1' -auto_update=1"
     );
     expect(result.errors).toEqual([]);
     expect(result.warnings).toContain('CFSM Agent 自更新将关闭，由本工具固定版本并校验 SHA256');
+    expect(result.warnings).toContain('旧版 CFSM 运行参数不会写入新配置；采样、节点和网卡请在 CFSM 面板设置');
     expect(result.config).toEqual({
       type: 'cfsm',
       endpoint: 'https://worker.example.com/update',
       token: 'my secret',
       remoteControl: false,
       agentId: 'server-id',
-      options: {
-        collectInterval: 2,
-        reportInterval: 60,
-        connectionMode: 'http',
-        pingMode: 'icmp',
-        resetDay: 0,
-        debug: false,
-        ctNode: 'ct.example.com:80',
-        cuNode: '',
-        cmNode: '',
-        bdNode: '',
-        node1: '',
-        node2: '',
-        node3: '',
-        node4: '',
-        networkInterface: 'eth0,eth1'
-      }
+      ua: 'My Agent/1.0 (Linux)'
     });
+  });
+
+  it('defaults the CF Server Monitor User-Agent and rejects unsafe values', () => {
+    const defaulted = parseMonitorCommand(
+      'curl https://github.com/huilang-me/cfsm-agent -id=abc -secret=s -url=https://worker.example/update'
+    );
+    expect(defaulted.errors).toEqual([]);
+    expect(defaulted.warnings).toEqual([]);
+    expect(defaulted.config?.type === 'cfsm' ? defaulted.config.ua : undefined).toBe('cfsm');
+
+    const invalid = parseMonitorCommand(
+      "curl https://github.com/huilang-me/cfsm-agent -id=abc -secret=s -url=https://worker.example/update -ua='bad|ua'"
+    );
+    expect(invalid.errors).toContain('User-Agent 只能包含字母、数字、空格与 . _ - / , : ; ( ) + = @ # * ? ~，且不超过 100 个字符');
+
+    const tooLong = parseMonitorCommand(
+      `curl https://github.com/huilang-me/cfsm-agent -id=abc -secret=s -url=https://worker.example/update -ua=${'a'.repeat(101)}`
+    );
+    expect(tooLong.errors).toContain('User-Agent 只能包含字母、数字、空格与 . _ - / , : ; ( ) + = @ # * ? ~，且不超过 100 个字符');
   });
 
   it('rejects unsafe or unsupported CF Server Monitor install options', () => {

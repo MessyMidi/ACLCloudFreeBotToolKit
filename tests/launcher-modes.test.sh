@@ -175,6 +175,99 @@ assert_after() {
     fi
 }
 
+# Old config.env values must survive both a pinned/custom binary and a failed
+# replacement. Exercise the real launcher with a local fake agent, not only
+# the generated pin metadata.
+assert_cfsm_legacy_config() {
+    local dir="$1"
+    local setting
+    for setting in \
+        'COLLECT_INTERVAL=2' 'REPORT_INTERVAL=120' 'CONNECTION_MODE=http' \
+        'PING_MODE=icmp' 'RESET_DAY=15' 'INTERFACE=eth0,eth1' \
+        'CT_NODE=ct.example.com:80' 'CU_NODE=cu.example.com:80' \
+        'CM_NODE=cm.example.com:80' 'BD_NODE=bd.example.com:80' \
+        'NODE_1=node1.example.com:443' 'NODE_2=node2.example.com:443' \
+        'NODE_3=node3.example.com:443' 'NODE_4=node4.example.com:443'; do
+        assert_contains "^${setting}$" "$dir/config/cfsm.conf"
+    done
+    assert_contains '^-debug=1$' "$dir/bin/cf-probe.args"
+    cmp "$dir/before.env" "$dir/config.env"
+}
+
+for cfsm_pin_mode in 0 1; do
+    legacy_cfsm_dir="$(make_fixture "cfsm-legacy-$cfsm_pin_mode")"
+    cat > "$legacy_cfsm_dir/bin/cf-probe" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == '--help' ]]; then exit 0; fi
+printf '%s\n' "$@" > "${0}.args"
+printf 'legacy cfsm fixture running\n'
+trap 'exit 0' TERM INT
+while true; do sleep 1; done
+EOF
+    chmod +x "$legacy_cfsm_dir/bin/cf-probe"
+    cat > "$legacy_cfsm_dir/config.env" <<EOF
+MIHOMO_ENABLED='0'
+MONITOR_ENABLED='1'
+MONITOR_TYPE='cfsm'
+MONITOR_ENDPOINT='https://worker.example.com/update'
+MONITOR_TOKEN='synthetic-token'
+MONITOR_AGENT_ID='synthetic-id'
+RUNTIME_VERSIONS_PINNED='$cfsm_pin_mode'
+MONITOR_VERSION='v1.1.1'
+MONITOR_URL='$(file_url "$legacy_cfsm_dir/unused-asset")'
+MONITOR_SHA256='$(sha256sum "$legacy_cfsm_dir/bin/cf-probe" | awk '{print $1}')'
+CFSM_COLLECT_INTERVAL='2'
+CFSM_REPORT_INTERVAL='120'
+CFSM_CONNECTION_MODE='http'
+CFSM_PING_MODE='icmp'
+CFSM_RESET_DAY='15'
+CFSM_DEBUG='1'
+CFSM_CT_NODE='ct.example.com:80'
+CFSM_CU_NODE='cu.example.com:80'
+CFSM_CM_NODE='cm.example.com:80'
+CFSM_BD_NODE='bd.example.com:80'
+CFSM_NODE_1='node1.example.com:443'
+CFSM_NODE_2='node2.example.com:443'
+CFSM_NODE_3='node3.example.com:443'
+CFSM_NODE_4='node4.example.com:443'
+CFSM_INTERFACE='eth0,eth1'
+EOF
+    cp "$legacy_cfsm_dir/config.env" "$legacy_cfsm_dir/before.env"
+    run_for_startup "$legacy_cfsm_dir" env
+    assert_cfsm_legacy_config "$legacy_cfsm_dir"
+    cp "$legacy_cfsm_dir/data/monitor-cfsm.install-state" "$legacy_cfsm_dir/installed.state"
+    cp "$legacy_cfsm_dir/bin/cf-probe" "$legacy_cfsm_dir/installed.binary"
+
+    # A failed download must retain the old agent, its state and its settings,
+    # even though MONITOR_VERSION now requests the newer configuration format.
+    printf "MONITOR_VERSION='v1.1.2'\nMONITOR_SHA256='%064d'\n" 0 >> "$legacy_cfsm_dir/config.env"
+    cp "$legacy_cfsm_dir/config.env" "$legacy_cfsm_dir/before.env"
+    run_for_startup "$legacy_cfsm_dir" env
+    assert_contains 'Monitor update failed; continuing with the existing binary' "$legacy_cfsm_dir/output.log"
+    assert_contains 'legacy cfsm fixture running' "$legacy_cfsm_dir/logs/monitor.log"
+    assert_cfsm_legacy_config "$legacy_cfsm_dir"
+    cmp "$legacy_cfsm_dir/installed.state" "$legacy_cfsm_dir/data/monitor-cfsm.install-state"
+    cmp "$legacy_cfsm_dir/installed.binary" "$legacy_cfsm_dir/bin/cf-probe"
+done
+
+# Legacy values remain validated before any install attempt, and cannot inject
+# extra lines into the agent's KEY=value configuration.
+sed '/^signal_bootstrap_installing$/,$d' "$PROJECT_DIR/launcher.sh" > "$legacy_cfsm_dir/validate.sh"
+for bad_setting in \
+    'CFSM_REPORT_INTERVAL=0' 'CFSM_RESET_DAY=32' 'CFSM_DEBUG=2' \
+    'CFSM_COLLECT_INTERVAL=999999999999999999999999' \
+    'CFSM_CONNECTION_MODE=invalid' 'CFSM_PING_MODE=udp' \
+    $'CFSM_INTERFACE=eth0\nAUTO_UPDATE=1'; do
+    cp "$legacy_cfsm_dir/before.env" "$legacy_cfsm_dir/config.env"
+    bad_field="${bad_setting%%=*}"
+    printf "%s='%s'\n" "$bad_field" "${bad_setting#*=}" >> "$legacy_cfsm_dir/config.env"
+    if (cd "$legacy_cfsm_dir" && bash validate.sh >validation.log 2>&1); then
+        printf 'launcher accepted invalid %s\n' "$bad_field" >&2
+        exit 1
+    fi
+    assert_contains "$bad_field" "$legacy_cfsm_dir/validation.log"
+done
+
 # Exercise the real configuration/defaults boundary without starting services
 # or contacting upstream. Old generated pins must not mask a launcher update.
 pins_dir="$(make_fixture official-pins)"
@@ -234,7 +327,7 @@ MONITOR_SHA256='757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa
 EOF
 cp "$pins_dir/config.env" "$pins_dir/cfsm.env"
 run_pins
-assert_contains '^resolved-monitor=v1.1.1|.*3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714$' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=v1.1.2|.*a1345e4791e117b61daa0c2dc2f986aa56d8c9e4ca593052fa65f5629a8353bb$' "$pins_dir/output.log"
 for field in MONITOR_VERSION MONITOR_URL MONITOR_SHA256; do
     cp "$pins_dir/cfsm.env" "$pins_dir/config.env"
     printf "%s='custom'\n" "$field" >> "$pins_dir/config.env"
@@ -278,7 +371,7 @@ sed -e 's/v1\.0\.18/v1.0.19/g' \
     "$pins_dir/cfsm.env" > "$pins_dir/recent-cfsm.env"
 cp "$pins_dir/recent-cfsm.env" "$pins_dir/config.env"
 run_pins
-assert_contains '^resolved-monitor=v1.1.1|.*3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714$' "$pins_dir/output.log"
+assert_contains '^resolved-monitor=v1.1.2|.*a1345e4791e117b61daa0c2dc2f986aa56d8c9e4ca593052fa65f5629a8353bb$' "$pins_dir/output.log"
 cp "$pins_dir/recent-cfsm.env" "$pins_dir/config.env"
 printf "RUNTIME_VERSIONS_PINNED='1'\n" >> "$pins_dir/config.env"
 run_pins
@@ -286,6 +379,20 @@ assert_contains '^resolved-monitor=v1.0.19|' "$pins_dir/output.log"
 sed '/^MONITOR_SHA256=/d' "$pins_dir/recent-cfsm.env" > "$pins_dir/config.env"
 run_pins
 assert_contains '^resolved-monitor=v1.0.19|.*64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c$' "$pins_dir/output.log"
+
+sed -e 's/v1\.0\.18/v1.1.1/g' \
+    -e 's/757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa/3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714/g' \
+    "$pins_dir/cfsm.env" > "$pins_dir/recent-cfsm-111.env"
+cp "$pins_dir/recent-cfsm-111.env" "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-monitor=v1.1.2|.*a1345e4791e117b61daa0c2dc2f986aa56d8c9e4ca593052fa65f5629a8353bb$' "$pins_dir/output.log"
+cp "$pins_dir/recent-cfsm-111.env" "$pins_dir/config.env"
+printf "RUNTIME_VERSIONS_PINNED='1'\n" >> "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-monitor=v1.1.1|' "$pins_dir/output.log"
+sed '/^MONITOR_SHA256=/d' "$pins_dir/recent-cfsm-111.env" > "$pins_dir/config.env"
+run_pins
+assert_contains '^resolved-monitor=v1.1.1|.*3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714$' "$pins_dir/output.log"
 
 # Legacy generated configs did not always include checksums. Leaving their
 # old URLs in place must never attach a new release's digest to those URLs.
@@ -367,14 +474,7 @@ MONITOR_AGENT_ID='server-id'
 MONITOR_REMOTE_CONTROL='false'
 MONITOR_VERSION='v1.0.19'
 MONITOR_URL='https://example.invalid/cf-probe-linux-amd64'
-CFSM_COLLECT_INTERVAL='2'
-CFSM_REPORT_INTERVAL='60'
-CFSM_CONNECTION_MODE='http'
-CFSM_PING_MODE='icmp'
-CFSM_RESET_DAY='0'
-CFSM_DEBUG='0'
-CFSM_CT_NODE='ct.example.com:80'
-CFSM_INTERFACE='eth0'
+CFSM_UA='My Agent/1.0 (Linux)'
 EOF
 make_long_running_agent "$cfsm_dir/bin/cf-probe"
 printf "MONITOR_SHA256='%s'\n" "$(sha256sum "$cfsm_dir/bin/cf-probe" | awk '{print $1}')" >> "$cfsm_dir/config.env"
@@ -384,10 +484,32 @@ assert_contains '^change this part$' "$cfsm_dir/output.log"
 assert_contains '^SERVER_ID=server-id$' "$cfsm_dir/config/cfsm.conf"
 assert_contains '^SECRET=test-secret$' "$cfsm_dir/config/cfsm.conf"
 assert_contains '^WORKER_URL=https://worker.example.com/update$' "$cfsm_dir/config/cfsm.conf"
-assert_contains '^COLLECT_INTERVAL=2$' "$cfsm_dir/config/cfsm.conf"
-assert_contains '^CONNECTION_MODE=http$' "$cfsm_dir/config/cfsm.conf"
-assert_contains '^PING_MODE=icmp$' "$cfsm_dir/config/cfsm.conf"
+assert_contains '^UA=My Agent/1.0 (Linux)$' "$cfsm_dir/config/cfsm.conf"
 assert_contains '^AUTO_UPDATE=0$' "$cfsm_dir/config/cfsm.conf"
+if grep -q '^COLLECT_INTERVAL=' "$cfsm_dir/config/cfsm.conf"; then
+    printf 'CFSM config unexpectedly kept server-managed settings\n' >&2
+    exit 1
+fi
+
+bad_ua_dir="$(make_fixture cfsm-bad-ua)"
+cat > "$bad_ua_dir/config.env" <<'EOF'
+MIHOMO_ENABLED='0'
+MONITOR_ENABLED='1'
+MONITOR_TYPE='cfsm'
+MONITOR_ENDPOINT='https://worker.example.com/update'
+MONITOR_TOKEN='test-secret'
+MONITOR_AGENT_ID='server-id'
+MONITOR_VERSION='v1.1.2'
+MONITOR_URL='https://example.invalid/cf-probe-linux-amd64'
+MONITOR_SHA256='0000'
+CFSM_UA='bad|ua'
+EOF
+make_long_running_agent "$bad_ua_dir/bin/cf-probe"
+if (cd "$bad_ua_dir" && bash launcher.sh </dev/null >output.log 2>&1); then
+    printf 'launcher accepted an unsafe CFSM_UA\n' >&2
+    exit 1
+fi
+assert_contains 'CFSM_UA contains characters that are not allowed' "$bad_ua_dir/output.log"
 
 # A changed version/SHA/URL must replace a previously installed monitor binary.
 for monitor_type in lite komari cfsm; do

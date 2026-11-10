@@ -172,7 +172,10 @@ refresh_official_runtime_pins() {
                   "${MONITOR_SHA256:-}" == '757a88084ce62e69379d0f9726b42291c06bfd51bdfdd58b45311d7a89ba5daa' ]] ||
                [[ "${MONITOR_VERSION:-}" == 'v1.0.19' &&
                   "${MONITOR_URL:-}" == 'https://github.com/huilang-me/cfsm-agent/releases/download/v1.0.19/cf-probe-linux-amd64' &&
-                  "${MONITOR_SHA256:-}" == '64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c' ]]; then
+                  "${MONITOR_SHA256:-}" == '64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c' ]] ||
+               [[ "${MONITOR_VERSION:-}" == 'v1.1.1' &&
+                  "${MONITOR_URL:-}" == 'https://github.com/huilang-me/cfsm-agent/releases/download/v1.1.1/cf-probe-linux-amd64' &&
+                  "${MONITOR_SHA256:-}" == '3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714' ]]; then
                 unset MONITOR_VERSION MONITOR_URL MONITOR_SHA256
                 log 'Using current Toolkit CFSM pin instead of the previous generated pin'
             fi
@@ -223,6 +226,12 @@ restore_legacy_official_checksums() {
             primary='https://github.com/huilang-me/cfsm-agent/releases/download/v1.0.19/cf-probe-linux-amd64'
             if [[ -z "${MONITOR_SHA256:-}" && "${MONITOR_URL:-$primary}" == "$primary" ]]; then
                 MONITOR_SHA256='64cc6e2a34ac49a39fb04894a48262bc0b3221d97ba7314dde15ad108097d52c'
+            fi
+            ;;
+        cfsm:v1.1.1)
+            primary='https://github.com/huilang-me/cfsm-agent/releases/download/v1.1.1/cf-probe-linux-amd64'
+            if [[ -z "${MONITOR_SHA256:-}" && "${MONITOR_URL:-$primary}" == "$primary" ]]; then
+                MONITOR_SHA256='3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714'
             fi
             ;;
         lite:2.3.3.5)
@@ -342,35 +351,58 @@ if [[ "$MONITOR_ENABLED" == "1" ]]; then
             MONITOR_ENDPOINT="${MONITOR_ENDPOINT:-${CFSM_URL:-}}"
             MONITOR_TOKEN="${MONITOR_TOKEN:-${CFSM_SECRET:-}}"
             MONITOR_AGENT_ID="${MONITOR_AGENT_ID:-${CFSM_ID:-}}"
-            MONITOR_VERSION="${MONITOR_VERSION:-v1.1.1}"
+            MONITOR_VERSION="${MONITOR_VERSION:-v1.1.2}"
             MONITOR_URL="${MONITOR_URL:-https://github.com/huilang-me/cfsm-agent/releases/download/${MONITOR_VERSION}/cf-probe-linux-amd64}"
-            MONITOR_SHA256="${MONITOR_SHA256:-3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714}"
+            MONITOR_SHA256="${MONITOR_SHA256:-a1345e4791e117b61daa0c2dc2f986aa56d8c9e4ca593052fa65f5629a8353bb}"
             MONITOR_BIN="$CFSM_BIN"
-            CFSM_COLLECT_INTERVAL="${CFSM_COLLECT_INTERVAL:-0}"
-            CFSM_REPORT_INTERVAL="${CFSM_REPORT_INTERVAL:-60}"
-            CFSM_CONNECTION_MODE="${CFSM_CONNECTION_MODE:-auto}"
-            CFSM_PING_MODE="${CFSM_PING_MODE:-tcp}"
-            CFSM_RESET_DAY="${CFSM_RESET_DAY:-1}"
+            # New configs leave sampling, nodes and interface settings to the
+            # panel. Keep explicitly supplied legacy values as initial defaults:
+            # pinned/custom agents and failed-download fallbacks still use them.
+            CFSM_UA="${CFSM_UA:-}"
             CFSM_DEBUG="${CFSM_DEBUG:-0}"
-            CFSM_CT_NODE="${CFSM_CT_NODE:-}"
-            CFSM_CU_NODE="${CFSM_CU_NODE:-}"
-            CFSM_CM_NODE="${CFSM_CM_NODE:-}"
-            CFSM_BD_NODE="${CFSM_BD_NODE:-}"
-            CFSM_NODE_1="${CFSM_NODE_1:-}"
-            CFSM_NODE_2="${CFSM_NODE_2:-}"
-            CFSM_NODE_3="${CFSM_NODE_3:-}"
-            CFSM_NODE_4="${CFSM_NODE_4:-}"
-            CFSM_INTERFACE="${CFSM_INTERFACE:-}"
+            CFSM_LEGACY_FIELDS=(
+                CFSM_COLLECT_INTERVAL CFSM_REPORT_INTERVAL CFSM_CONNECTION_MODE
+                CFSM_PING_MODE CFSM_RESET_DAY CFSM_CT_NODE CFSM_CU_NODE
+                CFSM_CM_NODE CFSM_BD_NODE CFSM_NODE_1 CFSM_NODE_2 CFSM_NODE_3
+                CFSM_NODE_4 CFSM_INTERFACE
+            )
 
             : "${MONITOR_AGENT_ID:?Set MONITOR_AGENT_ID in config.env}"
-            [[ "$CFSM_COLLECT_INTERVAL" =~ ^[0-9]+$ ]] || die "CFSM_COLLECT_INTERVAL must be an integer"
-            [[ "$CFSM_REPORT_INTERVAL" =~ ^[0-9]+$ ]] || die "CFSM_REPORT_INTERVAL must be an integer"
-            [[ "$CFSM_RESET_DAY" =~ ^[0-9]+$ ]] || die "CFSM_RESET_DAY must be an integer"
-            (( CFSM_REPORT_INTERVAL >= 1 )) || die "CFSM_REPORT_INTERVAL must be at least 1"
-            (( CFSM_RESET_DAY <= 31 )) || die "CFSM_RESET_DAY must be between 0 and 31"
-            [[ "$CFSM_CONNECTION_MODE" == "auto" || "$CFSM_CONNECTION_MODE" == "http" ]] || die "CFSM_CONNECTION_MODE must be auto or http"
-            [[ "$CFSM_PING_MODE" == "tcp" || "$CFSM_PING_MODE" == "icmp" ]] || die "CFSM_PING_MODE must be tcp or icmp"
             [[ "$CFSM_DEBUG" == "0" || "$CFSM_DEBUG" == "1" ]] || die "CFSM_DEBUG must be 0 or 1"
+            for cfsm_field in "${CFSM_LEGACY_FIELDS[@]}"; do
+                [[ -v "$cfsm_field" ]] || continue
+                cfsm_value="${!cfsm_field}"
+                [[ ! "$cfsm_value" =~ [[:cntrl:]] ]] || die "$cfsm_field cannot contain control characters"
+                case "$cfsm_field" in
+                    CFSM_COLLECT_INTERVAL|CFSM_REPORT_INTERVAL|CFSM_RESET_DAY)
+                        case "$cfsm_field" in
+                            CFSM_COLLECT_INTERVAL) cfsm_value="${cfsm_value:-0}" ;;
+                            CFSM_REPORT_INTERVAL) cfsm_value="${cfsm_value:-60}" ;;
+                            CFSM_RESET_DAY) cfsm_value="${cfsm_value:-1}" ;;
+                        esac
+                        [[ "$cfsm_value" =~ ^[0-9]{1,18}$ ]] || die "$cfsm_field must be a non-negative integer of at most 18 digits"
+                        if [[ "$cfsm_field" == 'CFSM_REPORT_INTERVAL' ]]; then
+                            (( 10#$cfsm_value >= 1 )) || die "CFSM_REPORT_INTERVAL must be at least 1"
+                        elif [[ "$cfsm_field" == 'CFSM_RESET_DAY' ]]; then
+                            (( 10#$cfsm_value <= 31 )) || die "CFSM_RESET_DAY must be between 0 and 31"
+                        fi
+                        ;;
+                    CFSM_CONNECTION_MODE)
+                        cfsm_value="${cfsm_value:-auto}"
+                        [[ "$cfsm_value" == 'auto' || "$cfsm_value" == 'http' ]] || die "CFSM_CONNECTION_MODE must be auto or http"
+                        ;;
+                    CFSM_PING_MODE)
+                        cfsm_value="${cfsm_value:-tcp}"
+                        [[ "$cfsm_value" == 'tcp' || "$cfsm_value" == 'icmp' ]] || die "CFSM_PING_MODE must be tcp or icmp"
+                        ;;
+                esac
+                printf -v "$cfsm_field" '%s' "$cfsm_value"
+            done
+            if [[ -n "$CFSM_UA" ]]; then
+                (( ${#CFSM_UA} <= 100 )) || die "CFSM_UA must be at most 100 characters"
+                cfsm_ua_pattern='^[A-Za-z0-9 _./,:;()+=@#*?~-]+$'
+                [[ "$CFSM_UA" =~ $cfsm_ua_pattern ]] || die "CFSM_UA contains characters that are not allowed"
+            fi
             ;;
         *)
             die "MONITOR_TYPE must be lite, komari, or cfsm"
@@ -678,24 +710,19 @@ generate_cfsm_config() {
     [[ "$MONITOR_ENABLED" == "1" && "$MONITOR_TYPE" == "cfsm" ]] || return 0
 
     local temporary="${CFSM_CONFIG}.tmp.$$"
+    local field
     {
         printf 'SERVER_ID=%s\n' "$MONITOR_AGENT_ID"
         printf 'SECRET=%s\n' "$MONITOR_TOKEN"
         printf 'WORKER_URL=%s\n' "$MONITOR_ENDPOINT"
-        printf 'COLLECT_INTERVAL=%s\n' "$CFSM_COLLECT_INTERVAL"
-        printf 'REPORT_INTERVAL=%s\n' "$CFSM_REPORT_INTERVAL"
-        printf 'CT_NODE=%s\n' "$CFSM_CT_NODE"
-        printf 'CU_NODE=%s\n' "$CFSM_CU_NODE"
-        printf 'CM_NODE=%s\n' "$CFSM_CM_NODE"
-        printf 'BD_NODE=%s\n' "$CFSM_BD_NODE"
-        printf 'NODE_1=%s\n' "$CFSM_NODE_1"
-        printf 'NODE_2=%s\n' "$CFSM_NODE_2"
-        printf 'NODE_3=%s\n' "$CFSM_NODE_3"
-        printf 'NODE_4=%s\n' "$CFSM_NODE_4"
-        printf 'INTERFACE=%s\n' "$CFSM_INTERFACE"
-        printf 'RESET_DAY=%s\n' "$CFSM_RESET_DAY"
-        printf 'CONNECTION_MODE=%s\n' "$CFSM_CONNECTION_MODE"
-        printf 'PING_MODE=%s\n' "$CFSM_PING_MODE"
+        if [[ -n "$CFSM_UA" ]]; then
+            printf 'UA=%s\n' "$CFSM_UA"
+        fi
+        for field in "${CFSM_LEGACY_FIELDS[@]}"; do
+            if [[ -v "$field" ]]; then
+                printf '%s=%s\n' "${field#CFSM_}" "${!field}"
+            fi
+        done
         printf 'AUTO_UPDATE=0\n'
         printf 'UPDATE_PROXY=\n'
         printf 'CONFIG_MD5=none\n'

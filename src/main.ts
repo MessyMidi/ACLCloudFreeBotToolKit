@@ -118,12 +118,7 @@ function parseCommand(): void {
   optionsRow.hidden = !isCfsm;
   if (parsedMonitor.type === 'cfsm') {
     byId('detected-agent-id').textContent = parsedMonitor.agentId;
-    byId('detected-cfsm-options').textContent = [
-      t('monitor.sample', { seconds: parsedMonitor.options.collectInterval }),
-      t('monitor.report', { seconds: parsedMonitor.options.reportInterval }),
-      parsedMonitor.options.connectionMode.toUpperCase(),
-      `Ping ${parsedMonitor.options.pingMode.toUpperCase()}`
-    ].join(' · ');
+    byId('detected-cfsm-options').textContent = parsedMonitor.ua;
   }
   byId('detected-endpoint').textContent = parsedMonitor.endpoint;
   byId('parse-warning').textContent = result.warnings.join(t('list.separator'));

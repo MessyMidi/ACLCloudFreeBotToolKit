@@ -36,11 +36,24 @@ export const TESTED_VERSIONS = {
     sha256: 'b25ce9827b2997bfc96f5e3e957dda52e2f1ea0564b2bd2aca14c6dd38e62562'
   },
   cfsm: {
-    version: 'v1.1.1',
-    url: 'https://github.com/huilang-me/cfsm-agent/releases/download/v1.1.1/cf-probe-linux-amd64',
-    sha256: '3d1592f3f31cb8d66764cad663c0a8ad9ed0a2a5e8f7052a3b3987b160232714'
+    version: 'v1.1.2',
+    url: 'https://github.com/huilang-me/cfsm-agent/releases/download/v1.1.2/cf-probe-linux-amd64',
+    sha256: 'a1345e4791e117b61daa0c2dc2f986aa56d8c9e4ca593052fa65f5629a8353bb'
   }
 } as const;
+
+/**
+ * The CFSM agent reports with `cfsm` unless the install command passes `-ua`.
+ * The server can override it later, so this is only the initial fallback.
+ */
+export const CFSM_DEFAULT_UA = 'cfsm';
+
+/**
+ * Same allow-list as the CFSM server and agent: characters that are safe in an
+ * HTTP header, the `KEY=value` config file, and shell quoting.
+ */
+export const CFSM_UA_PATTERN = /^[A-Za-z0-9 _.\-/,:;()+=@#*?~]+$/;
+export const CFSM_UA_MAX_LENGTH = 100;
 
 /**
  * Conservative common set supported by Mihomo and VLESS/Xray clients. The

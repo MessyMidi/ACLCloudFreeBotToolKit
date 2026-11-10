@@ -7,9 +7,9 @@
  * see /ADDITIONAL_TERMS.md
  */
 
-import { MONITOR_LABELS, TESTED_VERSIONS } from './constants';
+import { CFSM_DEFAULT_UA, CFSM_UA_MAX_LENGTH, CFSM_UA_PATTERN, MONITOR_LABELS, TESTED_VERSIONS } from './constants';
 import { t } from './i18n';
-import type { CfsmOptions, MonitorConfig, MonitorSelection, MonitorType, ParseResult, StandardMonitorConfig } from './types';
+import type { MonitorConfig, MonitorSelection, MonitorType, ParseResult, StandardMonitorConfig } from './types';
 
 interface TokenizeResult {
   tokens: string[];
@@ -158,44 +158,6 @@ function oneCfsmValue(
   return value;
 }
 
-function cfsmInteger(
-  tokens: string[],
-  names: string[],
-  label: string,
-  fallback: number,
-  minimum: number,
-  maximum: number | undefined,
-  errors: string[]
-): number {
-  const raw = oneCfsmValue(tokens, names, label, errors, String(fallback));
-  if (!/^\d+$/.test(raw)) {
-    errors.push(t('parse.integer', { label }));
-    return fallback;
-  }
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < minimum || (maximum !== undefined && value > maximum)) {
-    errors.push(maximum === undefined ? t('parse.minimum', { label, minimum }) : t('parse.range', { label, minimum, maximum }));
-    return fallback;
-  }
-  return value;
-}
-
-function cfsmChoice<T extends string>(
-  tokens: string[],
-  names: string[],
-  label: string,
-  fallback: T,
-  allowed: readonly T[],
-  errors: string[]
-): T {
-  const raw = oneCfsmValue(tokens, names, label, errors, fallback).toLowerCase();
-  if (!allowed.includes(raw as T)) {
-    errors.push(t('parse.choice', { label, allowed: allowed.join(' / ') }));
-    return fallback;
-  }
-  return raw as T;
-}
-
 function parseCfsm(tokens: string[], errors: string[], warnings: string[]): ParseResult {
   const agentId = oneCfsmValue(tokens, ['-id'], 'Server ID', errors);
   const token = oneCfsmValue(tokens, ['-secret'], 'Secret', errors);
@@ -203,26 +165,20 @@ function parseCfsm(tokens: string[], errors: string[], warnings: string[]): Pars
   if (endpoint && !validEndpoint(endpoint)) errors.push(t('parse.invalidUrl', { label: 'URL' }));
   if (token.length > 4096) errors.push(t('parse.tooLong', { label: 'Secret' }));
 
-  const options: CfsmOptions = {
-    collectInterval: cfsmInteger(tokens, ['-collect_interval', '-collect'], t('cfsm.collectInterval'), 0, 0, undefined, errors),
-    reportInterval: cfsmInteger(tokens, ['-interval'], t('cfsm.reportInterval'), 60, 1, undefined, errors),
-    connectionMode: cfsmChoice(tokens, ['-connection_mode', '-connection-mode'], t('cfsm.connectionMode'), 'auto', ['auto', 'http'], errors),
-    pingMode: cfsmChoice(tokens, ['-ping_mode', '-ping-mode'], t('cfsm.pingMode'), 'tcp', ['tcp', 'icmp'], errors),
-    resetDay: cfsmInteger(tokens, ['-reset_day'], t('cfsm.resetDay'), 1, 0, 31, errors),
-    debug: cfsmChoice(tokens, ['-debug'], t('cfsm.debug'), '0', ['0', '1'], errors) === '1',
-    ctNode: oneCfsmValue(tokens, ['-ct'], t('cfsm.ctNode'), errors, ''),
-    cuNode: oneCfsmValue(tokens, ['-cu'], t('cfsm.cuNode'), errors, ''),
-    cmNode: oneCfsmValue(tokens, ['-cm'], t('cfsm.cmNode'), errors, ''),
-    bdNode: oneCfsmValue(tokens, ['-bd', '-bgp'], t('cfsm.bgpNode'), errors, ''),
-    node1: oneCfsmValue(tokens, ['-node_1'], t('cfsm.customNode', { number: 1 }), errors, ''),
-    node2: oneCfsmValue(tokens, ['-node_2'], t('cfsm.customNode', { number: 2 }), errors, ''),
-    node3: oneCfsmValue(tokens, ['-node_3'], t('cfsm.customNode', { number: 3 }), errors, ''),
-    node4: oneCfsmValue(tokens, ['-node_4'], t('cfsm.customNode', { number: 4 }), errors, ''),
-    networkInterface: oneCfsmValue(tokens, ['-interface', '-interfaces', '-iface'], t('cfsm.interface'), errors, '')
-  };
-
-  if (options.reportInterval < options.collectInterval && options.collectInterval > 0) {
-    warnings.push(t('parse.intervalRaised'));
+  // CFSM delivers sampling, node and interface settings from the panel, so the
+  // only local runtime value left is the User-Agent fallback.
+  const uaLabel = t('cfsm.ua');
+  const ua = oneCfsmValue(tokens, ['-ua'], uaLabel, errors, CFSM_DEFAULT_UA).trim() || CFSM_DEFAULT_UA;
+  if (ua.length > CFSM_UA_MAX_LENGTH || !CFSM_UA_PATTERN.test(ua)) {
+    errors.push(t('parse.userAgentInvalid', { label: uaLabel, maximum: CFSM_UA_MAX_LENGTH }));
+  }
+  const legacyOptions = [
+    '-collect_interval', '-collect', '-interval', '-connection_mode', '-connection-mode',
+    '-ping_mode', '-ping-mode', '-reset_day', '-debug', '-ct', '-cu', '-cm', '-bd', '-bgp',
+    '-node_1', '-node_2', '-node_3', '-node_4', '-interface', '-interfaces', '-iface'
+  ];
+  if (tokens.some((token) => legacyOptions.includes(token.split('=')[0]!))) {
+    warnings.push(t('parse.cfsmLegacyOptionsIgnored'));
   }
 
   const autoUpdateLabel = t('cfsm.autoUpdate');
@@ -243,7 +199,7 @@ function parseCfsm(tokens: string[], errors: string[], warnings: string[]): Pars
   }
 
   if (errors.length > 0) return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
-  const config: MonitorConfig = { type: 'cfsm', endpoint, token, remoteControl: false, agentId, options };
+  const config: MonitorConfig = { type: 'cfsm', endpoint, token, remoteControl: false, agentId, ua };
   return { config, errors, warnings: [...new Set(warnings)] };
 }
 
