@@ -355,11 +355,49 @@ if [[ "$MONITOR_ENABLED" == "1" ]]; then
             MONITOR_URL="${MONITOR_URL:-https://github.com/huilang-me/cfsm-agent/releases/download/${MONITOR_VERSION}/cf-probe-linux-amd64}"
             MONITOR_SHA256="${MONITOR_SHA256:-a1345e4791e117b61daa0c2dc2f986aa56d8c9e4ca593052fa65f5629a8353bb}"
             MONITOR_BIN="$CFSM_BIN"
-            # Only the User-Agent is kept locally; sampling, nodes, interface and
-            # traffic settings are delivered by the panel at runtime.
+            # New configs leave sampling, nodes and interface settings to the
+            # panel. Keep explicitly supplied legacy values as initial defaults:
+            # pinned/custom agents and failed-download fallbacks still use them.
             CFSM_UA="${CFSM_UA:-}"
+            CFSM_DEBUG="${CFSM_DEBUG:-0}"
+            CFSM_LEGACY_FIELDS=(
+                CFSM_COLLECT_INTERVAL CFSM_REPORT_INTERVAL CFSM_CONNECTION_MODE
+                CFSM_PING_MODE CFSM_RESET_DAY CFSM_CT_NODE CFSM_CU_NODE
+                CFSM_CM_NODE CFSM_BD_NODE CFSM_NODE_1 CFSM_NODE_2 CFSM_NODE_3
+                CFSM_NODE_4 CFSM_INTERFACE
+            )
 
             : "${MONITOR_AGENT_ID:?Set MONITOR_AGENT_ID in config.env}"
+            [[ "$CFSM_DEBUG" == "0" || "$CFSM_DEBUG" == "1" ]] || die "CFSM_DEBUG must be 0 or 1"
+            for cfsm_field in "${CFSM_LEGACY_FIELDS[@]}"; do
+                [[ -v "$cfsm_field" ]] || continue
+                cfsm_value="${!cfsm_field}"
+                [[ ! "$cfsm_value" =~ [[:cntrl:]] ]] || die "$cfsm_field cannot contain control characters"
+                case "$cfsm_field" in
+                    CFSM_COLLECT_INTERVAL|CFSM_REPORT_INTERVAL|CFSM_RESET_DAY)
+                        case "$cfsm_field" in
+                            CFSM_COLLECT_INTERVAL) cfsm_value="${cfsm_value:-0}" ;;
+                            CFSM_REPORT_INTERVAL) cfsm_value="${cfsm_value:-60}" ;;
+                            CFSM_RESET_DAY) cfsm_value="${cfsm_value:-1}" ;;
+                        esac
+                        [[ "$cfsm_value" =~ ^[0-9]{1,18}$ ]] || die "$cfsm_field must be a non-negative integer of at most 18 digits"
+                        if [[ "$cfsm_field" == 'CFSM_REPORT_INTERVAL' ]]; then
+                            (( 10#$cfsm_value >= 1 )) || die "CFSM_REPORT_INTERVAL must be at least 1"
+                        elif [[ "$cfsm_field" == 'CFSM_RESET_DAY' ]]; then
+                            (( 10#$cfsm_value <= 31 )) || die "CFSM_RESET_DAY must be between 0 and 31"
+                        fi
+                        ;;
+                    CFSM_CONNECTION_MODE)
+                        cfsm_value="${cfsm_value:-auto}"
+                        [[ "$cfsm_value" == 'auto' || "$cfsm_value" == 'http' ]] || die "CFSM_CONNECTION_MODE must be auto or http"
+                        ;;
+                    CFSM_PING_MODE)
+                        cfsm_value="${cfsm_value:-tcp}"
+                        [[ "$cfsm_value" == 'tcp' || "$cfsm_value" == 'icmp' ]] || die "CFSM_PING_MODE must be tcp or icmp"
+                        ;;
+                esac
+                printf -v "$cfsm_field" '%s' "$cfsm_value"
+            done
             if [[ -n "$CFSM_UA" ]]; then
                 (( ${#CFSM_UA} <= 100 )) || die "CFSM_UA must be at most 100 characters"
                 cfsm_ua_pattern='^[A-Za-z0-9 _./,:;()+=@#*?~-]+$'
@@ -672,6 +710,7 @@ generate_cfsm_config() {
     [[ "$MONITOR_ENABLED" == "1" && "$MONITOR_TYPE" == "cfsm" ]] || return 0
 
     local temporary="${CFSM_CONFIG}.tmp.$$"
+    local field
     {
         printf 'SERVER_ID=%s\n' "$MONITOR_AGENT_ID"
         printf 'SECRET=%s\n' "$MONITOR_TOKEN"
@@ -679,6 +718,11 @@ generate_cfsm_config() {
         if [[ -n "$CFSM_UA" ]]; then
             printf 'UA=%s\n' "$CFSM_UA"
         fi
+        for field in "${CFSM_LEGACY_FIELDS[@]}"; do
+            if [[ -v "$field" ]]; then
+                printf '%s=%s\n' "${field#CFSM_}" "${!field}"
+            fi
+        done
         printf 'AUTO_UPDATE=0\n'
         printf 'UPDATE_PROXY=\n'
         printf 'CONFIG_MD5=none\n'
@@ -886,7 +930,7 @@ start_monitor() {
             ;;
         cfsm)
             generate_cfsm_config
-            "$MONITOR_BIN" run -config="$CFSM_CONFIG" >>"$MONITOR_LOG" 2>&1 &
+            "$MONITOR_BIN" run -config="$CFSM_CONFIG" -debug="$CFSM_DEBUG" >>"$MONITOR_LOG" 2>&1 &
             ;;
     esac
     MONITOR_PID=$!

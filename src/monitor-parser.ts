@@ -172,6 +172,14 @@ function parseCfsm(tokens: string[], errors: string[], warnings: string[]): Pars
   if (ua.length > CFSM_UA_MAX_LENGTH || !CFSM_UA_PATTERN.test(ua)) {
     errors.push(t('parse.userAgentInvalid', { label: uaLabel, maximum: CFSM_UA_MAX_LENGTH }));
   }
+  const legacyOptions = [
+    '-collect_interval', '-collect', '-interval', '-connection_mode', '-connection-mode',
+    '-ping_mode', '-ping-mode', '-reset_day', '-debug', '-ct', '-cu', '-cm', '-bd', '-bgp',
+    '-node_1', '-node_2', '-node_3', '-node_4', '-interface', '-interfaces', '-iface'
+  ];
+  if (tokens.some((token) => legacyOptions.includes(token.split('=')[0]!))) {
+    warnings.push(t('parse.cfsmLegacyOptionsIgnored'));
+  }
 
   const autoUpdateLabel = t('cfsm.autoUpdate');
   const autoUpdate = oneCfsmValue(tokens, ['-auto_update', '-auto-update'], autoUpdateLabel, errors, '0');

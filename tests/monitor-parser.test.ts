@@ -86,6 +86,7 @@ describe('parseMonitorCommand', () => {
     );
     expect(result.errors).toEqual([]);
     expect(result.warnings).toContain('CFSM Agent 自更新将关闭，由本工具固定版本并校验 SHA256');
+    expect(result.warnings).toContain('旧版 CFSM 运行参数不会写入新配置；采样、节点和网卡请在 CFSM 面板设置');
     expect(result.config).toEqual({
       type: 'cfsm',
       endpoint: 'https://worker.example.com/update',
@@ -101,6 +102,7 @@ describe('parseMonitorCommand', () => {
       'curl https://github.com/huilang-me/cfsm-agent -id=abc -secret=s -url=https://worker.example/update'
     );
     expect(defaulted.errors).toEqual([]);
+    expect(defaulted.warnings).toEqual([]);
     expect(defaulted.config?.type === 'cfsm' ? defaulted.config.ua : undefined).toBe('cfsm');
 
     const invalid = parseMonitorCommand(
